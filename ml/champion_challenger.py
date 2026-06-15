@@ -12,9 +12,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-import numpy as np
-
 from ml.dataset import TrainingSet
+from ml.metrics import auc as _auc
+from ml.metrics import auc_lower_ci as _auc_lower_ci
 from ml.setup_classifier import SetupClassifier
 
 
@@ -31,48 +31,6 @@ class ShadowReport:
     lift_auc: float           # challenger_auc - 0.5
     recommend_promote: bool
     reason: str
-
-
-def _rankdata(a: np.ndarray) -> np.ndarray:
-    """Ranks com media em empates (suficiente para AUC)."""
-    order = np.argsort(a, kind="mergesort")
-    ranks = np.empty(len(a), dtype=float)
-    sa = a[order]
-    i = 0
-    n = len(a)
-    while i < n:
-        j = i
-        while j + 1 < n and sa[j + 1] == sa[i]:
-            j += 1
-        avg = (i + j) / 2.0 + 1.0  # ranks 1-based
-        ranks[order[i : j + 1]] = avg
-        i = j + 1
-    return ranks
-
-
-def _auc(y: np.ndarray, scores: np.ndarray) -> float:
-    pos = scores[y == 1]
-    neg = scores[y == 0]
-    n_pos, n_neg = len(pos), len(neg)
-    if n_pos == 0 or n_neg == 0:
-        return 0.5  # indefinido -> sem skill
-    ranks = _rankdata(scores)
-    sum_pos = ranks[y == 1].sum()
-    return (sum_pos - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg)
-
-
-def _auc_se(auc: float, n_pos: int, n_neg: int) -> float:
-    """Erro-padrao da AUC (Hanley-McNeil) — usado para o IC anti-overfitting."""
-    if n_pos == 0 or n_neg == 0:
-        return 0.5
-    q1 = auc / (2 - auc)
-    q2 = 2 * auc * auc / (1 + auc)
-    num = (
-        auc * (1 - auc)
-        + (n_pos - 1) * (q1 - auc * auc)
-        + (n_neg - 1) * (q2 - auc * auc)
-    )
-    return float(np.sqrt(max(num, 0.0) / (n_pos * n_neg)))
 
 
 def evaluate(
@@ -111,10 +69,9 @@ def evaluate(
 
     n_pos = int((yte == 1).sum())
     n_neg = int((yte == 0).sum())
-    se = _auc_se(auc, n_pos, n_neg)
     # IC 99% unilateral (z=2.33): barra conservadora — o modelo vai influenciar
     # decisoes com dinheiro real, entao exigimos skill bem acima do acaso.
-    lower_ci = auc - 2.33 * se
+    lower_ci = _auc_lower_ci(auc, n_pos, n_neg)
 
     baseline_exp = float(pnlte.mean()) if len(pnlte) else 0.0
     taken = proba >= threshold

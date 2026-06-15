@@ -9,9 +9,13 @@ Sem dependencia externa de ML (regressao logistica em numpy puro) — sklearn na
 esta instalado e o projeto e enxuto. Ver docs/research/11-camada-ml.md.
 """
 
+from ml.calibration import CalibrationReport, calibration_report
 from ml.champion_challenger import ShadowReport, evaluate
 from ml.dataset import REGIMES, TrainingSet, build_training_set
+from ml.model_store import ModelStore, load_promoted_classifier
+from ml.retraining import RetrainingResult, run_retraining, run_retraining_from_log
 from ml.setup_classifier import SetupClassifier
+from ml.walk_forward import WalkForwardReport, walk_forward
 
 __all__ = [
     "SetupClassifier",
@@ -20,4 +24,13 @@ __all__ = [
     "REGIMES",
     "evaluate",
     "ShadowReport",
+    "walk_forward",
+    "WalkForwardReport",
+    "calibration_report",
+    "CalibrationReport",
+    "ModelStore",
+    "load_promoted_classifier",
+    "run_retraining",
+    "run_retraining_from_log",
+    "RetrainingResult",
 ]

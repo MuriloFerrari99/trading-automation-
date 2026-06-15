@@ -16,6 +16,12 @@ metadata:
 > **Alpaca não negocia pares de moedas** — esta engine pressupõe um **feed forex/MT5**. Use-a primeiro para
 > **backtest das regras determinísticas**, não como módulo do bot Alpaca atual.
 
+> ✅ **Implementado** em [`fimathe/engine.py`](../../fimathe/engine.py) (vetorizado em pandas/numpy), com
+> testes (`tests/test_fimathe_engine.py`). Diferenças vs. spec: layout **flat** `fimathe/` (não `src/`);
+> **numba** omitido (otimização futura); parâmetros extras de calibração forex no construtor
+> (`pip_size`, `account_balance`, `pip_value`, `rsi_period`, `atr_period`, `adx_period`). O **canal usa as
+> velas anteriores** (`shift(1)`) para que o rompimento seja detectável.
+
 ---
 
 ## 1. Visão geral

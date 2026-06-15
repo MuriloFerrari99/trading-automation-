@@ -18,6 +18,8 @@ env/
 # Banco de dados local / logs
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 *.db
 logs/
 *.log
@@ -30,3 +32,5 @@ logs/
 # Simulacao (cache de dados e relatorios gerados)
 data/cache/
 data/sim_report.txt
+data/experiment_report.txt
+data/experiment_oos_report.txt

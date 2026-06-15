@@ -5,7 +5,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from core.models import OrderIntent, OrderSide, OrderType
-from simulation.costs import CRYPTO_BASE, EQUITY_BASE, CostModel
+from simulation.costs import CRYPTO_BASE, EQUITY_BASE
 from simulation.sim_broker import SimBroker
 
 

@@ -38,6 +38,7 @@ class FakeBroker(BrokerClient):
         self._cash = cash
         self._prices: dict[str, Decimal] = dict(prices or {})
         self._positions: dict[str, Position] = {}
+        self._bars: dict[str, list[Decimal]] = {}
         self._options_level = options_level
         self._market_open = market_open
         self._today = today or date(2026, 6, 15)
@@ -108,6 +109,13 @@ class FakeBroker(BrokerClient):
         if symbol not in self._prices:
             raise KeyError(f"FakeBroker sem preco para {symbol}; use set_price()")
         return self._prices[symbol]
+
+    def set_bars(self, symbol: str, closes) -> None:
+        self._bars[symbol.upper()] = [Decimal(str(c)) for c in closes]
+
+    def get_bars(self, symbol: str, limit: int = 60) -> list[Decimal]:
+        bars = self._bars.get(symbol.upper(), [])
+        return list(bars[-limit:])
 
     def submit_order(self, intent: OrderIntent) -> OrderResult:
         # Idempotencia: mesmo client_order_id => devolve a ordem existente sem

@@ -89,6 +89,18 @@ class AlpacaBroker(BrokerClient):
         latest = self._data.get_stock_latest_trade(req)
         return _to_decimal(latest[symbol.upper()].price)
 
+    def get_bars(self, symbol: str, limit: int = 60) -> list[Decimal]:
+        from alpaca.data.requests import StockBarsRequest
+        from alpaca.data.timeframe import TimeFrame
+
+        symbol = symbol.upper()
+        req = StockBarsRequest(
+            symbol_or_symbols=symbol, timeframe=TimeFrame.Day, limit=limit
+        )
+        bars = self._data.get_stock_bars(req)
+        data = getattr(bars, "data", {}).get(symbol, []) if bars else []
+        return [_to_decimal(b.close) for b in data]
+
     def submit_order(self, intent: OrderIntent) -> OrderResult:
         order_request = self._build_order_request(intent)
         order = self._trading.submit_order(order_request)

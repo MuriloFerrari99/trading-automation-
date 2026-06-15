@@ -82,6 +82,10 @@ class BrokerClient(ABC):
         """Retorna o ultimo preco negociado do ativo (quote/trade)."""
 
     @abstractmethod
+    def get_bars(self, symbol: str, limit: int = 60) -> list[Decimal]:
+        """Fechamentos recentes (ordem cronologica) p/ classificacao de regime."""
+
+    @abstractmethod
     def submit_order(self, intent: OrderIntent) -> OrderResult:
         """Submete uma ordem a partir de uma intencao ja validada."""
 

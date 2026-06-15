@@ -355,9 +355,9 @@ Da página oficial de suporte ("What option levels or tiers do you provide?"):
   **duas aplicações** iniciais.
 - O nível é controlado por `max_options_trading_level` no endpoint de **account configurations**;
   o nível efetivo (`options_trading_level`) é sempre ≤ `options_approved_level`.
-- **Paper trading**: contas paper têm acesso amplo — a documentação indica que **paper accounts
-  recebem automaticamente até Level 3**, ideal para testar o bot sem capital real. *(Confirme
-  no seu paper account — ver Incertezas.)*
+- **Paper trading**: contas paper têm acesso amplo. ✅ **Confirmado na conta paper deste projeto
+  (`PA30UJ3ZJK1Q`, jun/2026): `options_approved_level = 3` e `options_trading_level = 3`** — ou seja,
+  a Wheel inteira (Level 1) e até multi-leg (Level 3) estão liberadas para testar sem capital real.
 
 ### Options market data (feeds)
 

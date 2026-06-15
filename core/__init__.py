@@ -6,6 +6,9 @@ from core.kill_switch import (
     KillSwitchEngagedError,
 )
 from core.models import (
+    OptionContract,
+    OptionOrderIntent,
+    OptionType,
     OrderIntent,
     OrderResult,
     OrderSide,
@@ -19,6 +22,9 @@ __all__ = [
     "DEFAULT_SENTINEL",
     "KillSwitch",
     "KillSwitchEngagedError",
+    "OptionContract",
+    "OptionOrderIntent",
+    "OptionType",
     "OrderIntent",
     "OrderResult",
     "OrderSide",

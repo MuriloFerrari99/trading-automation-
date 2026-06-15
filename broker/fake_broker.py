@@ -7,10 +7,19 @@ contas, posicoes, precos e preenchimento imediato de ordens a mercado.
 from __future__ import annotations
 
 import itertools
+from datetime import date, timedelta
 from decimal import Decimal
 
 from broker.base import AccountInfo, BrokerClient
-from core.models import OrderIntent, OrderResult, OrderSide, Position
+from core.models import (
+    OptionContract,
+    OptionOrderIntent,
+    OptionType,
+    OrderIntent,
+    OrderResult,
+    OrderSide,
+    Position,
+)
 
 
 class FakeBroker(BrokerClient):
@@ -23,14 +32,17 @@ class FakeBroker(BrokerClient):
         prices: dict[str, Decimal] | None = None,
         options_level: int = 0,
         market_open: bool = True,
+        today: date | None = None,
     ) -> None:
         self._cash = cash
         self._prices: dict[str, Decimal] = dict(prices or {})
         self._positions: dict[str, Position] = {}
         self._options_level = options_level
         self._market_open = market_open
+        self._today = today or date(2026, 6, 15)
         self._order_ids = itertools.count(1)
         self.submitted: list[OrderIntent] = []  # historico p/ asserts em testes
+        self.submitted_options: list[OptionOrderIntent] = []
 
     # --- helpers de teste ---------------------------------------------------
     def set_price(self, symbol: str, price: Decimal | str | float) -> None:
@@ -38,6 +50,9 @@ class FakeBroker(BrokerClient):
 
     def set_market_open(self, is_open: bool) -> None:
         self._market_open = is_open
+
+    def set_options_level(self, level: int) -> None:
+        self._options_level = level
 
     def seed_position(self, symbol: str, qty: Decimal, avg_entry_price: Decimal) -> None:
         symbol = symbol.upper()
@@ -132,3 +147,50 @@ class FakeBroker(BrokerClient):
 
     def is_market_open(self) -> bool:
         return self._market_open
+
+    # --- Opcoes -------------------------------------------------------------
+    def select_option_contract(
+        self,
+        underlying: str,
+        option_type: OptionType,
+        target_strike: Decimal,
+        *,
+        min_dte: int,
+        max_dte: int,
+    ) -> OptionContract | None:
+        # Sintetiza um contrato: strike arredondado ao inteiro mais proximo e
+        # vencimento no meio da janela de DTE pedida. Suficiente para exercitar
+        # a logica da Wheel sem uma cadeia de opcoes real.
+        underlying = underlying.upper()
+        strike = Decimal(round(target_strike))
+        dte = (min_dte + max_dte) // 2
+        expiration = self._today + timedelta(days=dte)
+        occ = (
+            f"{underlying}{expiration:%y%m%d}"
+            f"{'P' if option_type == OptionType.PUT else 'C'}"
+            f"{int(strike) * 1000:08d}"
+        )
+        return OptionContract(
+            occ_symbol=occ,
+            underlying=underlying,
+            option_type=option_type,
+            strike=strike,
+            expiration=expiration,
+        )
+
+    def submit_option_order(self, intent: OptionOrderIntent) -> OrderResult:
+        self.submitted_options.append(intent)
+        # Premio simulado: 1% do strike por acao (100 acoes por contrato).
+        premium_per_share = intent.contract.strike * Decimal("0.01")
+        premium = premium_per_share * Decimal(100) * intent.qty
+        if intent.side == OrderSide.SELL:
+            self._cash += premium  # vender premio credita caixa
+        return OrderResult(
+            broker_order_id=f"fake-opt-{next(self._order_ids)}",
+            symbol=intent.contract.occ_symbol,
+            side=intent.side,
+            qty=intent.qty,
+            filled_qty=intent.qty,
+            filled_avg_price=premium_per_share,
+            status="filled",
+        )

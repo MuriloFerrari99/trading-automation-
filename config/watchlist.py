@@ -1,7 +1,13 @@
 """Carregamento da watchlist (ativos monitorados + parametros por ativo).
 
-A watchlist e configuravel via `config/watchlist.yaml`. Cada item traz o
-percentual de trailing stop especifico do ativo.
+A watchlist e configuravel via `config/watchlist.yaml`. Cada ativo pode ter
+configuracao para uma ou mais estrategias, todas opcionais:
+
+- trailing_stop_pct: percentual de trailing stop (Nivel 1).
+- ladder: compras escalonadas em quedas (Nivel 1), com ancora e degraus.
+
+Percentuais sao informados em pontos percentuais no YAML (ex: 10.0) e
+convertidos aqui para fracao (0.10).
 """
 
 from __future__ import annotations
@@ -15,11 +21,52 @@ from pydantic import BaseModel, Field, field_validator
 DEFAULT_WATCHLIST_PATH = Path("config/watchlist.yaml")
 
 
+class LadderRung(BaseModel):
+    """Um degrau da escada de compras: compre `qty` quando cair `drop_pct`."""
+
+    # Fracao (0..1) de queda em relacao a ancora.
+    drop_pct: Decimal = Field(..., gt=0, lt=1)
+    qty: Decimal = Field(..., gt=0)
+
+
+class LadderConfig(BaseModel):
+    """Configuracao de Ladder Buys de um ativo."""
+
+    # Preco de referencia das quedas. Se ausente, usa o primeiro preco
+    # observado pela estrategia (persistido no state).
+    anchor_price: Decimal | None = Field(default=None, gt=0)
+    rungs: list[LadderRung]
+
+    @field_validator("rungs")
+    @classmethod
+    def _non_empty_sorted(cls, v: list[LadderRung]) -> list[LadderRung]:
+        if not v:
+            raise ValueError("ladder.rungs nao pode ser vazio")
+        # Ordena por profundidade da queda (mais raso primeiro) para um
+        # comportamento deterministico e indices estaveis.
+        return sorted(v, key=lambda r: r.drop_pct)
+
+
+class WheelConfig(BaseModel):
+    """Configuracao da Wheel Strategy (opcoes) de um ativo.
+
+    A habilitacao real depende ainda do gate de elegibilidade (nivel de
+    opcoes da conta + liquidez), verificado em tempo de execucao.
+    """
+
+    # Distancia OTM (fracao): vende put ~otm_pct abaixo do preco e covered call
+    # ~otm_pct acima do preco de custo.
+    otm_pct: Decimal = Field(..., gt=0, lt=1)
+    contracts: int = Field(1, gt=0)  # 1 contrato = 100 acoes
+    min_dte: int = Field(20, gt=0)
+    max_dte: int = Field(45, gt=0)
+
+
 class WatchlistItem(BaseModel):
     symbol: str
-    # Fracao (0..1). No YAML o valor e informado em pontos percentuais (ex 10.0)
-    # e convertido aqui para fracao (0.10).
-    trailing_stop_pct: Decimal = Field(..., gt=0, lt=1)
+    trailing_stop_pct: Decimal | None = Field(default=None, gt=0, lt=1)
+    ladder: LadderConfig | None = None
+    wheel: WheelConfig | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -38,16 +85,45 @@ class Watchlist(BaseModel):
         return next((i for i in self.items if i.symbol == symbol), None)
 
 
+def _pct_to_fraction(value) -> Decimal:
+    return Decimal(str(value)) / Decimal(100)
+
+
+def _parse_ladder(raw: dict) -> LadderConfig:
+    rungs = [
+        LadderRung(drop_pct=_pct_to_fraction(r["drop_pct"]), qty=Decimal(str(r["qty"])))
+        for r in raw.get("rungs", [])
+    ]
+    anchor = raw.get("anchor_price")
+    return LadderConfig(
+        anchor_price=Decimal(str(anchor)) if anchor is not None else None,
+        rungs=rungs,
+    )
+
+
+def _parse_wheel(raw: dict) -> WheelConfig:
+    return WheelConfig(
+        otm_pct=_pct_to_fraction(raw["otm_pct"]),
+        contracts=int(raw.get("contracts", 1)),
+        min_dte=int(raw.get("min_dte", 20)),
+        max_dte=int(raw.get("max_dte", 45)),
+    )
+
+
 def load_watchlist(path: Path | str = DEFAULT_WATCHLIST_PATH) -> Watchlist:
     """Le e valida a watchlist do YAML, convertendo % para fracao."""
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
     items = []
     for entry in raw.get("symbols", []):
-        pct_points = Decimal(str(entry["trailing_stop_pct"]))
+        trailing = entry.get("trailing_stop_pct")
+        ladder_raw = entry.get("ladder")
+        wheel_raw = entry.get("wheel")
         items.append(
             WatchlistItem(
                 symbol=entry["symbol"],
-                trailing_stop_pct=pct_points / Decimal(100),
+                trailing_stop_pct=_pct_to_fraction(trailing) if trailing is not None else None,
+                ladder=_parse_ladder(ladder_raw) if ladder_raw else None,
+                wheel=_parse_wheel(wheel_raw) if wheel_raw else None,
             )
         )
     if not items:

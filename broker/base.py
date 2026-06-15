@@ -10,7 +10,14 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from decimal import Decimal
 
-from core.models import OrderIntent, OrderResult, Position
+from core.models import (
+    OptionContract,
+    OptionOrderIntent,
+    OptionType,
+    OrderIntent,
+    OrderResult,
+    Position,
+)
 
 
 class AccountInfo:
@@ -70,3 +77,21 @@ class BrokerClient(ABC):
     @abstractmethod
     def is_market_open(self) -> bool:
         """True se o mercado esta aberto agora (clock da corretora)."""
+
+    # --- Opcoes (Nivel 3) ---------------------------------------------------
+    @abstractmethod
+    def select_option_contract(
+        self,
+        underlying: str,
+        option_type: OptionType,
+        target_strike: Decimal,
+        *,
+        min_dte: int,
+        max_dte: int,
+    ) -> OptionContract | None:
+        """Seleciona o contrato mais proximo do strike-alvo dentro da janela de
+        vencimento (DTE = dias ate expirar). Retorna None se nada elegivel."""
+
+    @abstractmethod
+    def submit_option_order(self, intent: OptionOrderIntent) -> OrderResult:
+        """Submete uma ordem de opcoes a partir de uma intencao ja validada."""

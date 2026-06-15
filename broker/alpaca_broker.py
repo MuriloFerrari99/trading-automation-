@@ -12,6 +12,9 @@ from decimal import Decimal
 from broker.base import AccountInfo, BrokerClient
 from config.settings import Settings
 from core.models import (
+    OptionContract,
+    OptionOrderIntent,
+    OptionType,
     OrderIntent,
     OrderResult,
     OrderSide,
@@ -138,3 +141,68 @@ class AlpacaBroker(BrokerClient):
 
     def is_market_open(self) -> bool:
         return bool(self._trading.get_clock().is_open)
+
+    # --- Opcoes -------------------------------------------------------------
+    # NOTA: caminho de opcoes ainda NAO exercitado contra a API real. A
+    # selecao de contrato usa o endpoint de option contracts do alpaca-py.
+    def select_option_contract(
+        self,
+        underlying: str,
+        option_type: OptionType,
+        target_strike: Decimal,
+        *,
+        min_dte: int,
+        max_dte: int,
+    ) -> OptionContract | None:
+        from datetime import timedelta
+
+        from alpaca.trading.enums import ContractType
+        from alpaca.trading.requests import GetOptionContractsRequest
+
+        today = self._trading.get_clock().timestamp.date()
+        req = GetOptionContractsRequest(
+            underlying_symbols=[underlying.upper()],
+            type=ContractType.PUT if option_type == OptionType.PUT else ContractType.CALL,
+            expiration_date_gte=today + timedelta(days=min_dte),
+            expiration_date_lte=today + timedelta(days=max_dte),
+            limit=200,
+        )
+        contracts = self._trading.get_option_contracts(req).option_contracts or []
+        if not contracts:
+            return None
+        # Escolhe o strike mais proximo do alvo.
+        best = min(contracts, key=lambda c: abs(_to_decimal(c.strike_price) - target_strike))
+        return OptionContract(
+            occ_symbol=best.symbol,
+            underlying=underlying.upper(),
+            option_type=option_type,
+            strike=_to_decimal(best.strike_price),
+            expiration=best.expiration_date,
+        )
+
+    def submit_option_order(self, intent: OptionOrderIntent) -> OrderResult:
+        from alpaca.trading.enums import OrderSide as ASide
+        from alpaca.trading.enums import TimeInForce as ATIF
+        from alpaca.trading.requests import MarketOrderRequest
+
+        side = ASide.BUY if intent.side == OrderSide.BUY else ASide.SELL
+        req = MarketOrderRequest(
+            symbol=intent.contract.occ_symbol,
+            qty=float(intent.qty),
+            side=side,
+            time_in_force=ATIF.DAY,
+        )
+        order = self._trading.submit_order(req)
+        return OrderResult(
+            broker_order_id=str(order.id),
+            symbol=intent.contract.occ_symbol,
+            side=intent.side,
+            qty=intent.qty,
+            filled_qty=_to_decimal(getattr(order, "filled_qty", 0)),
+            filled_avg_price=(
+                _to_decimal(order.filled_avg_price)
+                if getattr(order, "filled_avg_price", None) is not None
+                else None
+            ),
+            status=str(getattr(order, "status", "accepted")),
+        )

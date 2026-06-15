@@ -55,6 +55,19 @@ CREATE TABLE IF NOT EXISTS state (
     value           TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL
 );
+
+-- Sinais/sugestoes (Nivel 2). NUNCA executam automaticamente: sao apenas
+-- input/sugestao para o Planejador e ficam aqui para revisao humana e auditoria.
+CREATE TABLE IF NOT EXISTS signals (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT    NOT NULL,   -- quando foi registrado
+    symbol          TEXT    NOT NULL,
+    side            TEXT    NOT NULL,
+    source          TEXT    NOT NULL,   -- ex: congress, smart_money
+    confidence      TEXT    NOT NULL,
+    note            TEXT,
+    created_at      TEXT    NOT NULL    -- timestamp do proprio sinal
+);
 """
 
 

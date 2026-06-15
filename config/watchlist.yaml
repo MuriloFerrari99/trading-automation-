@@ -1,8 +1,35 @@
-# Watchlist do MVP — ativos monitorados e parametros por ativo.
-# trailing_stop_pct: percentual abaixo da maxima (high-water) em que o stop
-# dispara a venda. Ex: 10.0 => vende se o preco cair 10% abaixo da maxima.
+# Watchlist — ativos monitorados e parametros por ativo.
+# Cada ativo pode ter uma ou mais estrategias (todas opcionais):
+#
+#   trailing_stop_pct: % abaixo da maxima (high-water) em que o stop vende.
+#   ladder:            compras escalonadas em quedas para reduzir preco medio.
+#     anchor_price:    preco de referencia das quedas (opcional; se ausente,
+#                      usa o primeiro preco observado).
+#     rungs:           degraus -> compre `qty` ao cair `drop_pct` da ancora.
+#                      Cada degrau dispara no maximo uma vez.
+#
+# Observacao: trailing stop (venda) e ladder (compra) no MESMO ativo podem se
+# conflitar (o trailing tende a vender antes do ladder comprar). Por isso o
+# exemplo abaixo separa: AAPL usa trailing; MSFT usa ladder.
 symbols:
   - symbol: AAPL
     trailing_stop_pct: 10.0
+
   - symbol: MSFT
-    trailing_stop_pct: 8.0
+    ladder:
+      # anchor_price: 400.0   # descomente p/ fixar a ancora
+      rungs:
+        - drop_pct: 20.0
+          qty: 5
+        - drop_pct: 30.0
+          qty: 10
+
+  # Wheel Strategy (opcoes / Nivel 3) — OPT-IN e desabilitada por padrao.
+  # So habilite se a conta tiver nivel de opcoes e liquidez (o gate verifica
+  # em runtime e recusa caso contrario). Descomente para ativar:
+  # - symbol: KO
+  #   wheel:
+  #     otm_pct: 10.0      # vende put ~10% abaixo; covered call ~10% acima do custo
+  #     contracts: 1       # 1 contrato = 100 acoes
+  #     min_dte: 20        # janela de vencimento (dias)
+  #     max_dte: 45

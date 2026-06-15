@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     # True, o guard em `enforce_paper_only()` aborta a execucao.
     live_trading: bool = Field(False, alias="LIVE_TRADING")
 
+    # Implementacao de orquestracao: "local" (padrao) ou "opensquad".
+    # "opensquad" exige um OrchestratorBridge concreto (aguardando doc/SDK).
+    orchestrator: str = Field("local", alias="ORCHESTRATOR")
+
     @field_validator("alpaca_api_key", "alpaca_secret_key")
     @classmethod
     def _not_blank(cls, v: str) -> str:

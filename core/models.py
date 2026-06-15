@@ -6,7 +6,7 @@ Usamos Pydantic v2 para validacao em runtime nas fronteiras do sistema
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 
@@ -16,6 +16,11 @@ from pydantic import BaseModel, Field, field_validator
 class OrderSide(str, Enum):
     BUY = "buy"
     SELL = "sell"
+
+
+class OptionType(str, Enum):
+    PUT = "put"
+    CALL = "call"
 
 
 class OrderType(str, Enum):
@@ -105,6 +110,41 @@ class Signal(BaseModel):
     confidence: float = Field(0.5, ge=0.0, le=1.0)
     note: str = ""
     created_at: datetime = Field(default_factory=_utcnow)
+
+
+class OptionContract(BaseModel):
+    """Contrato de opcao selecionado na corretora."""
+
+    # Simbolo OCC do contrato (ex: AAPL250117P00190000), quando disponivel.
+    occ_symbol: str
+    underlying: str
+    option_type: OptionType
+    strike: Decimal = Field(..., gt=0)
+    expiration: date
+
+    @field_validator("underlying")
+    @classmethod
+    def _norm_underlying(cls, v: str) -> str:
+        return v.strip().upper()
+
+
+class OptionOrderIntent(BaseModel):
+    """Intencao de ordem de OPCOES (Nivel 3 — Wheel Strategy).
+
+    Distinta de OrderIntent (acoes): o Executor despacha por tipo. Como a Wheel
+    so vende premio (cash-secured puts e covered calls), o lado e sempre SELL
+    no MVP, mas o campo e explicito para clareza/auditoria.
+    """
+
+    contract: OptionContract
+    side: OrderSide = OrderSide.SELL
+    qty: Decimal = Field(..., gt=0)  # numero de contratos (1 contrato = 100 acoes)
+    strategy: str = "wheel"
+    created_at: datetime = Field(default_factory=_utcnow)
+
+    @property
+    def underlying(self) -> str:
+        return self.contract.underlying
 
 
 class OrderResult(BaseModel):

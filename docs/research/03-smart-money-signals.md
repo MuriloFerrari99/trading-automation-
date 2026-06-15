@@ -166,14 +166,27 @@ resposta real ao implementar, pois nomes podem mudar*):
 - **Tier grátis** existe, porém **com dados atrasados e profundidade histórica limitada**; **API completa
   é paga** (a partir de ~US$ 25–30/mês).
 - **Formato:** JSON estruturado com nome do membro, partido, ticker, tipo de transação e **faixa de valor**.
-- Endpoints separados para **House**, **Senate**, além de insider, lobbying, contratos governamentais,
-  net worth de políticos etc. Autenticação por **Bearer token**.
+- **Endpoints (base `https://api.quiverquant.com/beta`):**
+  - `GET /live/congresstrading` — trades recentes de **todos** os membros (o que o bot usa).
+  - `GET /bulk/congresstrading` — histórico completo (todos os membros).
+  - `GET /historical/congresstrading/{ticker}` — por ticker.
+- **Auth:** o pacote oficial usa `Authorization: Token <API_KEY>` (a doc web menciona `Bearer` — se
+  `Token` falhar, tente `Bearer`). Provider pronto em **§7**.
+- **Campos** (PascalCase): `Representative`/`Name`, `Ticker`, `Transaction` (`Purchase`/`Sale`),
+  `TransactionDate`, `ReportDate`, `Range`, `Amount`, `House`, `Party`, `TickerType`.
 
 **Unusual Whales** — `https://unusualwhales.com/`
 - **API documentada:** `https://api.unusualwhales.com/docs`
   (OpenAPI YAML: `https://api.unusualwhales.com/api/openapi`; dev portal: `https://unusualwhales.com/developers`).
 - Mesmo núcleo de dados do STOCK Act (House + Senate), **incluindo transações de cônjuge/dependente** e
   **visões de portfólio por político**.
+- **Endpoints de Congresso (base `https://api.unusualwhales.com`):**
+  - `GET /api/congress/recent-trades` — trades recentes de todos os membros (o que o bot usa).
+    Params: `limit`, `date`, `ticker`. Resposta em `{"data": [...]}`.
+  - `GET /api/congress/congress-trader` — relatórios por trader · `GET /api/congress/late-reports`.
+- **Auth:** `Authorization: Bearer <API_KEY>` (chave em unusualwhales.com/settings/api-dashboard). Provider em **§7**.
+- **Campos** (snake_case): `ticker`, `txn_type` (`Buy`/`Sell`), `transaction_date`, `filed_at_date`,
+  `amounts` (string tipo `"$1,001 - $15,000"` → parsear), `name`, `reporter`, `issuer`.
 - **Tier grátis limitado**; **API paga** com tiers (em 2025: Trial ~US$50/semana, Basic ~US$150/mês,
   Advanced ~US$375/mês). A API cobre também options flow, dark pool, 13F, insiders.
 
@@ -349,6 +362,7 @@ from __future__ import annotations
 
 import abc
 import datetime as dt
+import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
@@ -600,6 +614,136 @@ def _parse_date(s: str | None) -> dt.date | None:
         return dt.date.fromisoformat(s[:10])
     except ValueError:
         return None
+
+
+def _parse_amount_range(s: str | None) -> tuple[float | None, float | None]:
+    """'$1,001 - $15,000' -> (1001.0, 15000.0). Aceita também valor único."""
+    if not s:
+        return (None, None)
+    nums = re.findall(r"[\d,]+(?:\.\d+)?", s)
+    vals = [float(n.replace(",", "")) for n in nums] or [None]
+    return (vals[0], vals[-1] if len(vals) > 1 else vals[0])
+
+
+# ---------- Provider concreto: Quiver Quantitative (PAGO, com SLA) ------------ #
+
+class QuiverProvider(SignalProvider):
+    """
+    Fallback estável (pago) ao Capitol Trades. Usa /live/congresstrading
+    (recentes de todos os membros). Docs: https://api.quiverquant.com/docs
+    """
+
+    name = "quiver_congress"
+    actor_class = ActorClass.CONGRESS
+    BASE = "https://api.quiverquant.com/beta"
+    _SIDE = {"purchase": Side.BUY, "buy": Side.BUY, "sale": Side.SELL, "sell": Side.SELL}
+
+    def __init__(self, api_key: str, min_interval_s: float = 0.3):
+        # O pacote oficial usa "Token <key>"; se 401, troque por "Bearer <key>".
+        self.headers = {"Authorization": f"Token {api_key}",
+                        "Accept": "application/json"}
+        self.min_interval_s = min_interval_s
+
+    def _get(self, path: str) -> list[dict]:
+        time.sleep(self.min_interval_s)
+        resp = requests.get(f"{self.BASE}{path}", headers=self.headers, timeout=30)
+        resp.raise_for_status()
+        return resp.json()
+
+    def healthcheck(self) -> bool:
+        try:
+            self._get("/live/congresstrading")
+            return True
+        except requests.RequestException:
+            return False
+
+    def fetch(self, since: dt.date) -> Iterable[Signal]:
+        for tx in self._get("/live/congresstrading"):
+            filed_at = _parse_date(tx.get("ReportDate") or tx.get("Filed"))
+            if filed_at is None or filed_at < since:
+                continue
+            side = self._SIDE.get((tx.get("Transaction") or "").strip().lower())
+            if side is None:                       # ignora "Exchange" etc.
+                continue
+            ticker = (tx.get("Ticker") or "").upper().strip()
+            if not ticker:
+                continue
+            low, high = _parse_amount_range(tx.get("Range"))
+            yield Signal(
+                ticker=ticker,
+                side=side,
+                actor=tx.get("Representative") or tx.get("Name") or "unknown",
+                actor_class=self.actor_class,
+                traded_at=_parse_date(tx.get("TransactionDate") or tx.get("Traded")),
+                filed_at=filed_at,
+                size_usd_low=low,
+                size_usd_high=high,
+                source="quiver:live/congresstrading",
+                confidence=0.55,
+                raw=tx,
+            )
+
+
+# --------- Provider concreto: Unusual Whales (PAGO, com SLA) ------------------ #
+
+class UnusualWhalesProvider(SignalProvider):
+    """
+    Fallback estável (pago). Usa /api/congress/recent-trades.
+    Inclui cônjuge/dependente. Docs: https://api.unusualwhales.com/docs
+    """
+
+    name = "unusual_whales_congress"
+    actor_class = ActorClass.CONGRESS
+    BASE = "https://api.unusualwhales.com"
+    _SIDE = {"buy": Side.BUY, "purchase": Side.BUY,
+             "sell": Side.SELL, "sale": Side.SELL}
+
+    def __init__(self, api_key: str, limit: int = 200, min_interval_s: float = 0.3):
+        self.headers = {"Authorization": f"Bearer {api_key}",
+                        "Accept": "application/json"}
+        self.limit = limit
+        self.min_interval_s = min_interval_s
+
+    def _get(self) -> list[dict]:
+        time.sleep(self.min_interval_s)
+        resp = requests.get(f"{self.BASE}/api/congress/recent-trades",
+                            params={"limit": self.limit},
+                            headers=self.headers, timeout=30)
+        resp.raise_for_status()
+        return resp.json().get("data", [])         # resposta vem em {"data": [...]}
+
+    def healthcheck(self) -> bool:
+        try:
+            self._get()
+            return True
+        except requests.RequestException:
+            return False
+
+    def fetch(self, since: dt.date) -> Iterable[Signal]:
+        for tx in self._get():
+            filed_at = _parse_date(tx.get("filed_at_date"))
+            if filed_at is None or filed_at < since:
+                continue
+            side = self._SIDE.get((tx.get("txn_type") or "").strip().lower())
+            if side is None:
+                continue
+            ticker = (tx.get("ticker") or "").upper().strip()
+            if not ticker:
+                continue
+            low, high = _parse_amount_range(tx.get("amounts"))
+            yield Signal(
+                ticker=ticker,
+                side=side,
+                actor=tx.get("name") or tx.get("reporter") or "unknown",
+                actor_class=self.actor_class,
+                traded_at=_parse_date(tx.get("transaction_date")),
+                filed_at=filed_at,
+                size_usd_low=low,
+                size_usd_high=high,
+                source="unusual_whales:recent-trades",
+                confidence=0.55,
+                raw=tx,
+            )
 
 
 # ------------------------- Agregador (consenso/ranking) ----------------------- #

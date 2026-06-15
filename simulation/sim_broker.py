@@ -19,7 +19,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from broker.base import BrokerOrder
+from broker.base import AccountInfo, BrokerOrder
 from core.models import OrderResult, OrderSide, OrderType, Position
 
 
@@ -59,17 +59,23 @@ class SimBroker:
     def set_index(self, i: int) -> None:
         self._i = i
 
-    def fill_pending_at_open(self, i: int) -> None:
-        """Preenche ordens enfileiradas no bar anterior, no OPEN do bar i."""
+    def fill_pending_at_open(self, i: int) -> list[dict]:
+        """Preenche ordens do bar anterior no OPEN do bar i. Retorna os fills."""
         if not self._pending:
-            return
+            return []
         open_px = Decimal(str(self._open[i]))
+        fills: list[dict] = []
         for intent in self._pending:
             if intent.side == OrderSide.BUY:
-                self._fill_buy(open_px, intent.qty)
+                price = self._fill_buy(open_px, intent.qty)
             else:
-                self._fill_sell(open_px, intent.qty)
+                price = self._fill_sell(open_px, intent.qty)
+            fills.append({
+                "symbol": self._symbol, "side": intent.side.value,
+                "filled_qty": intent.qty, "fill_price": price,
+            })
         self._pending = []
+        return fills
 
     def update_trailing_and_maybe_trigger(self) -> None:
         """Atualiza high-water com o fechamento atual; se romper, enfileira venda."""
@@ -90,12 +96,24 @@ class SimBroker:
         if self._qty > 0:
             self.bars_in_market += 1
 
-    def liquidate_final(self) -> None:
-        """Fecha qualquer posicao remanescente no ultimo fechamento (saida limpa)."""
+    def liquidate_final(self) -> dict | None:
+        """Fecha posicao remanescente no ultimo fechamento. Retorna o fill (ou None)."""
         if self._qty > 0:
-            self._fill_sell(Decimal(str(self._close[self._i])), self._qty)
+            qty = self._qty
+            price = self._fill_sell(Decimal(str(self._close[self._i])), qty)
+            return {"symbol": self._symbol, "side": "sell", "filled_qty": qty, "fill_price": price}
+        return None
 
     # --- interface usada pelas estrategias ----------------------------------
+    def get_account(self) -> AccountInfo:
+        close = Decimal(str(self._close[self._i]))
+        equity = self._cash + self._qty * close
+        # Sem margem no backtest: buying_power = caixa (cap natural do ladder).
+        buying_power = max(self._cash, Decimal(0))
+        return AccountInfo(
+            cash=self._cash, buying_power=buying_power, equity=equity, options_level=0
+        )
+
     def get_last_price(self, symbol: str) -> Decimal:
         return Decimal(str(self._close[self._i]))
 
@@ -138,7 +156,7 @@ class SimBroker:
         )
 
     # --- contabilidade de fills ---------------------------------------------
-    def _fill_buy(self, ref_px: Decimal, qty: Decimal) -> None:
+    def _fill_buy(self, ref_px: Decimal, qty: Decimal) -> Decimal:
         price = ref_px * (Decimal(1) + self._slippage)
         cost = price * qty
         commission = cost * self._commission
@@ -146,8 +164,9 @@ class SimBroker:
         new_qty = self._qty + qty
         self._avg = (self._avg * self._qty + price * qty) / new_qty if new_qty > 0 else price
         self._qty = new_qty
+        return price
 
-    def _fill_sell(self, ref_px: Decimal, qty: Decimal) -> None:
+    def _fill_sell(self, ref_px: Decimal, qty: Decimal) -> Decimal:
         price = ref_px * (Decimal(1) - self._slippage)
         proceeds = price * qty
         commission = proceeds * self._commission
@@ -160,6 +179,7 @@ class SimBroker:
             self._qty = Decimal(0)
             self._avg = Decimal(0)
             self._trailing = None
+        return price
 
 
 class _MarketSell:

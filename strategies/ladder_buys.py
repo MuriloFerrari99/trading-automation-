@@ -48,6 +48,13 @@ class LadderBuysStrategy(Strategy):
             price = ctx.broker.get_last_price(symbol)
             anchor = self._resolve_anchor(symbol, item.ladder, price, ctx.state)
 
+            # Stop de invalidacao global: se a tese quebrou (preco caiu alem do
+            # limite), liquida a escada inteira e re-arma (doc 02 §3.3).
+            stop_intent = self._maybe_invalidation_stop(ctx, item, anchor, price)
+            if stop_intent is not None:
+                intents.append(stop_intent)
+                continue  # nao compra novos degraus no mesmo ciclo da liquidacao
+
             for index, rung in enumerate(item.ladder.rungs):
                 key = rung_key(symbol, index)
                 if ctx.state.get(key) is not None:
@@ -72,6 +79,30 @@ class LadderBuysStrategy(Strategy):
                     ctx.state.set(key, "filled")
 
         return intents
+
+    def _maybe_invalidation_stop(self, ctx, item, anchor: Decimal, price: Decimal):
+        """Liquida a escada se o preco rompeu o stop de invalidacao global."""
+        ladder = item.ladder
+        if ladder.stop_loss_pct is None:
+            return None
+        position = ctx.broker.get_position(item.symbol)
+        if position is None or position.qty <= 0:
+            return None
+        stop_level = anchor * (Decimal(1) - ladder.stop_loss_pct)
+        if price > stop_level:
+            return None
+        logger.info(
+            "Ladder %s STOP DE INVALIDACAO: price=%s <= %s (anchor=%s, -%s) — liquida %s",
+            item.symbol, price, stop_level, anchor, ladder.stop_loss_pct, position.qty,
+        )
+        self.reset(item.symbol, ctx.state)  # re-arma a escada do zero
+        return OrderIntent(
+            symbol=item.symbol,
+            side=OrderSide.SELL,
+            qty=position.qty,
+            order_type=OrderType.MARKET,
+            strategy=self.name,
+        )
 
     def _resolve_anchor(
         self,

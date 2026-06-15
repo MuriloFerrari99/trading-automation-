@@ -36,6 +36,10 @@ class LadderConfig(BaseModel):
     # observado pela estrategia (persistido no state).
     anchor_price: Decimal | None = Field(default=None, gt=0)
     rungs: list[LadderRung]
+    # Stop de invalidacao global (fracao). Se o preco cair stop_loss_pct abaixo
+    # da ancora, a tese quebrou: liquida a escada inteira (doc 02 §3.3). None =
+    # sem stop global (comportamento legado). Deve ser mais fundo que o ultimo degrau.
+    stop_loss_pct: Decimal | None = Field(default=None, gt=0, lt=1)
 
     @field_validator("rungs")
     @classmethod
@@ -95,9 +99,11 @@ def _parse_ladder(raw: dict) -> LadderConfig:
         for r in raw.get("rungs", [])
     ]
     anchor = raw.get("anchor_price")
+    stop = raw.get("stop_loss_pct")
     return LadderConfig(
         anchor_price=Decimal(str(anchor)) if anchor is not None else None,
         rungs=rungs,
+        stop_loss_pct=_pct_to_fraction(stop) if stop is not None else None,
     )
 
 

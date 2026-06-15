@@ -14,10 +14,14 @@ import time
 
 from broker.base import BrokerClient
 from core.kill_switch import KillSwitch
-from core.models import OrderIntent, OrderResult, OrderSide
+from core.models import OptionOrderIntent, OrderIntent, OrderResult, OrderSide
 from data.trade_logger import TradeLogger
 
 logger = logging.getLogger("agent.executor")
+
+# Nivel minimo de opcoes p/ executar ordens de opcoes (defesa em profundidade;
+# a estrategia Wheel ja aplica o mesmo gate antes de gerar a intencao).
+REQUIRED_OPTIONS_LEVEL = 1
 
 
 class OrderValidationError(ValueError):
@@ -40,7 +44,7 @@ class Executor:
         self._max_retries = max_retries
         self._backoff = backoff_seconds
 
-    def execute(self, intent: OrderIntent) -> OrderResult | None:
+    def execute(self, intent: OrderIntent | OptionOrderIntent) -> OrderResult | None:
         """Executa uma intencao. Retorna None se barrada por kill switch/validacao."""
         # 1) Kill switch — barreira central antes de qualquer ordem.
         try:
@@ -49,23 +53,60 @@ class Executor:
             logger.warning("Ordem barrada pelo kill switch: %s", exc)
             return None
 
-        # 2) Validacao.
+        # 2) Despacho por tipo de instrumento.
+        if isinstance(intent, OptionOrderIntent):
+            return self._execute_option(intent)
+        return self._execute_equity(intent)
+
+    def _execute_equity(self, intent: OrderIntent) -> OrderResult | None:
         try:
             self._validate(intent)
         except OrderValidationError as exc:
             logger.warning("Intencao reprovada (%s %s): %s", intent.side.value, intent.symbol, exc)
             return None
 
-        # 3) Submissao com retry/backoff.
-        result = self._submit_with_retry(intent)
+        result = self._submit_with_retry(lambda: self._broker.submit_order(intent), intent.symbol, intent.side)
         if result is None:
             return None
-
-        # 4) Auditoria.
         self._logger.log_execution(intent, result)
         return result
 
-    def execute_many(self, intents: list[OrderIntent]) -> list[OrderResult]:
+    def _execute_option(self, intent: OptionOrderIntent) -> OrderResult | None:
+        # Gate defensivo: reverifica o nivel de opcoes da conta.
+        account = self._broker.get_account()
+        if account.options_level < REQUIRED_OPTIONS_LEVEL:
+            logger.warning(
+                "Ordem de opcoes barrada: nivel da conta (%d) < requerido (%d) — %s",
+                account.options_level, REQUIRED_OPTIONS_LEVEL, intent.contract.occ_symbol,
+            )
+            return None
+        if intent.qty <= 0:
+            logger.warning("Ordem de opcoes reprovada: qty <= 0")
+            return None
+
+        result = self._submit_with_retry(
+            lambda: self._broker.submit_option_order(intent),
+            intent.contract.occ_symbol,
+            intent.side,
+        )
+        if result is None:
+            return None
+        # Auditoria: registra com o equivalente em acoes (contratos * 100).
+        self._log_option_execution(intent, result)
+        return result
+
+    def _log_option_execution(self, intent: OptionOrderIntent, result: OrderResult) -> None:
+        from core.models import OrderIntent as _OI
+
+        audit_intent = _OI(
+            symbol=intent.contract.occ_symbol,
+            side=intent.side,
+            qty=intent.qty,
+            strategy=intent.strategy,
+        )
+        self._logger.log_execution(audit_intent, result)
+
+    def execute_many(self, intents: list[OrderIntent | OptionOrderIntent]) -> list[OrderResult]:
         results = []
         for intent in intents:
             res = self.execute(intent)
@@ -93,21 +134,22 @@ class Executor:
         except Exception:
             return None  # sem preco => pula a checagem de custo
 
-    def _submit_with_retry(self, intent: OrderIntent) -> OrderResult | None:
+    def _submit_with_retry(self, submit, symbol: str, side) -> OrderResult | None:
+        """Executa `submit()` com retry/backoff em erros transitorios da API."""
         last_exc: Exception | None = None
         for attempt in range(1, self._max_retries + 1):
             try:
-                return self._broker.submit_order(intent)
+                return submit()
             except Exception as exc:  # erro transitorio da API
                 last_exc = exc
                 logger.warning(
                     "Falha ao submeter %s %s (tentativa %d/%d): %s",
-                    intent.side.value, intent.symbol, attempt, self._max_retries, exc,
+                    side.value, symbol, attempt, self._max_retries, exc,
                 )
                 if attempt < self._max_retries:
                     time.sleep(self._backoff * attempt)
         logger.error(
             "Ordem %s %s falhou apos %d tentativas: %s",
-            intent.side.value, intent.symbol, self._max_retries, last_exc,
+            side.value, symbol, self._max_retries, last_exc,
         )
         return None

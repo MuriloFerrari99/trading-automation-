@@ -24,10 +24,17 @@ from config.watchlist import load_watchlist
 from core.kill_switch import KillSwitch
 from core.market_clock import MarketClock
 from data.db import Database
+from data.signal_repo import SignalRepository
 from data.state_repo import StateRepository
 from data.trade_logger import TradeLogger
-from orchestration.local_orchestrator import LocalOrchestrator
+from orchestration.base import AgentOrchestrator
+from orchestration.factory import build_orchestrator
+from strategies.ladder_buys import LadderBuysStrategy
+from strategies.signals.base import SignalService
+from strategies.signals.congress import CongressTradingProvider, StaticCongressSource
+from strategies.signals.smart_money import SmartMoneyProvider, StaticSmartMoneySource
 from strategies.trailing_stop import TrailingStopStrategy
+from strategies.wheel import WheelStrategy
 
 logger = logging.getLogger("main")
 
@@ -48,17 +55,41 @@ def build_broker(settings) -> BrokerClient:
     return AlpacaBroker(settings)
 
 
-def build_app(broker: BrokerClient) -> tuple[Monitor, LocalOrchestrator]:
+def build_app(
+    broker: BrokerClient, orchestrator_name: str = "local"
+) -> tuple[Monitor, AgentOrchestrator]:
     db = Database()
     state = StateRepository(db)
     trade_logger = TradeLogger(db)
+    signal_repo = SignalRepository(db)
     kill_switch = KillSwitch()
     watchlist = load_watchlist()
 
-    strategies = [TrailingStopStrategy()]
-    planner = Planner(broker, state, watchlist, strategies)
+    # Sinais (Nivel 2): providers atras de fontes swappable. Por padrao usam
+    # fontes estaticas VAZIAS (nenhum sinal real) — seguro e pronto p/ plugar
+    # uma fonte real (Capital Trades, 13F, etc.) sem mexer no resto.
+    signal_service = SignalService(
+        [
+            CongressTradingProvider(StaticCongressSource()),
+            SmartMoneyProvider(StaticSmartMoneySource()),
+        ]
+    )
+
+    # WheelStrategy so age em ativos com `wheel` na watchlist E se o gate de
+    # elegibilidade (nivel de opcoes + liquidez) passar em runtime.
+    strategies = [TrailingStopStrategy(), LadderBuysStrategy(), WheelStrategy()]
+    planner = Planner(
+        broker,
+        state,
+        watchlist,
+        strategies,
+        signal_service=signal_service,
+        signal_repo=signal_repo,
+    )
     executor = Executor(broker, trade_logger, kill_switch)
-    orchestrator = LocalOrchestrator(planner, executor)
+    # Orquestrador selecionado por config (factory). Trocar p/ OpenSquad depois
+    # e so mudar ORCHESTRATOR no .env (e fornecer um OrchestratorBridge).
+    orchestrator = build_orchestrator(orchestrator_name, planner, executor)
 
     clock = MarketClock(broker)
     monitor = Monitor(orchestrator, clock, interval_minutes=MONITOR_INTERVAL_MINUTES)
@@ -82,7 +113,10 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("Falha ao carregar configuracao: %s", exc)
         return 2
 
-    logger.info("Modo paper trading. Endpoint: %s", settings.alpaca_endpoint)
+    logger.info(
+        "Modo paper trading. Endpoint: %s | orquestrador: %s",
+        settings.alpaca_endpoint, settings.orchestrator,
+    )
 
     broker = build_broker(settings)
 
@@ -95,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    monitor, _ = build_app(broker)
+    monitor, _ = build_app(broker, settings.orchestrator)
 
     if args.once:
         monitor.tick()

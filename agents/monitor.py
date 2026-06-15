@@ -38,8 +38,9 @@ class Monitor:
         logger.info("Mercado aberto — iniciando ciclo de orquestracao.")
         result = self._orchestrator.run_cycle()
         logger.info(
-            "Ciclo concluido: %d intencao(oes), %d ordem(ns) executada(s).",
-            result.intents_count, result.executed_count,
+            "Ciclo concluido: %d sinal(is) sugerido(s), %d intencao(oes), "
+            "%d ordem(ns) executada(s).",
+            result.signals_count, result.intents_count, result.executed_count,
         )
         return result
 

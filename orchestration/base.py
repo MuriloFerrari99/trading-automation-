@@ -9,9 +9,9 @@ reescrever agentes nem estrategias.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
-from core.models import OrderIntent, OrderResult
+from core.models import OrderIntent, OrderResult, Signal
 
 
 @dataclass
@@ -20,6 +20,9 @@ class CycleResult:
 
     intents: list[OrderIntent]
     results: list[OrderResult]
+    # Sinais coletados no ciclo. Apenas sugestoes/auditoria — NAO foram
+    # executados (sinais nunca viram ordens automaticamente).
+    signals: list[Signal] = field(default_factory=list)
 
     @property
     def intents_count(self) -> int:
@@ -28,6 +31,10 @@ class CycleResult:
     @property
     def executed_count(self) -> int:
         return len(self.results)
+
+    @property
+    def signals_count(self) -> int:
+        return len(self.signals)
 
 
 class AgentOrchestrator(ABC):

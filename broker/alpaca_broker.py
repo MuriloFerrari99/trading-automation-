@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from broker.base import AccountInfo, BrokerClient, BrokerOrder
+from broker.base import AccountInfo, BrokerClient, BrokerOrder, MarketClockInfo
 from config.settings import Settings
 from core.models import (
     OptionContract,
@@ -197,6 +197,15 @@ class AlpacaBroker(BrokerClient):
 
     def is_market_open(self) -> bool:
         return bool(self._trading.get_clock().is_open)
+
+    def get_clock(self) -> MarketClockInfo:
+        clock = self._trading.get_clock()
+        return MarketClockInfo(
+            is_open=bool(clock.is_open),
+            next_open=getattr(clock, "next_open", None),
+            next_close=getattr(clock, "next_close", None),
+            timestamp=getattr(clock, "timestamp", None),
+        )
 
     # --- Opcoes -------------------------------------------------------------
     # NOTA: caminho de opcoes ainda NAO exercitado contra a API real. A

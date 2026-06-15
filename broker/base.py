@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from datetime import datetime
 from decimal import Decimal
 
 from core.models import (
@@ -19,6 +20,20 @@ from core.models import (
     OrderResult,
     Position,
 )
+
+
+@dataclass
+class MarketClockInfo:
+    """Estado do relogio de mercado (fonte de verdade: clock da corretora).
+
+    `is_open` ja considera feriados e early-close (a corretora resolve isso via
+    calendar). next_open/next_close permitem agendar/logar com precisao.
+    """
+
+    is_open: bool
+    next_open: datetime | None = None
+    next_close: datetime | None = None
+    timestamp: datetime | None = None
 
 
 @dataclass
@@ -104,6 +119,10 @@ class BrokerClient(ABC):
     @abstractmethod
     def is_market_open(self) -> bool:
         """True se o mercado esta aberto agora (clock da corretora)."""
+
+    @abstractmethod
+    def get_clock(self) -> MarketClockInfo:
+        """Relogio de mercado completo (is_open + next_open/next_close)."""
 
     # --- Opcoes (Nivel 3) ---------------------------------------------------
     @abstractmethod

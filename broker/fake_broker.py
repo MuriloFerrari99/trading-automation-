@@ -10,7 +10,7 @@ import itertools
 from datetime import date, timedelta
 from decimal import Decimal
 
-from broker.base import AccountInfo, BrokerClient, BrokerOrder
+from broker.base import AccountInfo, BrokerClient, BrokerOrder, MarketClockInfo
 from core.models import (
     OptionContract,
     OptionOrderIntent,
@@ -41,6 +41,8 @@ class FakeBroker(BrokerClient):
         self._bars: dict[str, list[Decimal]] = {}
         self._options_level = options_level
         self._market_open = market_open
+        self._next_open = None
+        self._next_close = None
         self._today = today or date(2026, 6, 15)
         self._order_ids = itertools.count(1)
         self.submitted: list[OrderIntent] = []  # historico p/ asserts em testes
@@ -223,6 +225,21 @@ class FakeBroker(BrokerClient):
 
     def is_market_open(self) -> bool:
         return self._market_open
+
+    def get_clock(self) -> "MarketClockInfo":
+        from datetime import datetime, time, timezone
+
+        ts = datetime.combine(self._today, time(12, 0), tzinfo=timezone.utc)
+        return MarketClockInfo(
+            is_open=self._market_open,
+            next_open=self._next_open,
+            next_close=self._next_close,
+            timestamp=ts,
+        )
+
+    def set_clock(self, *, next_open=None, next_close=None) -> None:
+        self._next_open = next_open
+        self._next_close = next_close
 
     # --- Opcoes -------------------------------------------------------------
     def select_option_contract(

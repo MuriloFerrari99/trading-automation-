@@ -32,8 +32,13 @@ class Monitor:
 
     def tick(self) -> CycleResult | None:
         """Executa um ciclo se o mercado estiver aberto; senao pula."""
-        if not self._clock.is_open():
-            logger.info("Mercado fechado — ciclo do Monitor pulado.")
+        clock = self._clock.info()
+        if not clock.is_open:
+            nxt = clock.next_open
+            logger.info(
+                "Mercado fechado — ciclo pulado.%s",
+                f" Proxima abertura: {nxt}." if nxt else "",
+            )
             return None
         logger.info("Mercado aberto — iniciando ciclo de orquestracao.")
         result = self._orchestrator.run_cycle()
@@ -45,18 +50,15 @@ class Monitor:
         return result
 
     def start(self) -> None:
-        """Inicia o agendamento bloqueante (uso em producao via main.py)."""
-        from apscheduler.schedulers.blocking import BlockingScheduler
+        """Inicia o agendamento bloqueante (UTC; DST-safe) via APScheduler."""
+        from scheduling.scheduler import add_interval_job, make_scheduler
 
-        scheduler = BlockingScheduler()
-        scheduler.add_job(
-            self.tick,
-            "interval",
-            minutes=self._interval_minutes,
-            next_run_time=None,
+        scheduler = make_scheduler()  # timezone=UTC
+        add_interval_job(
+            scheduler, self.tick, minutes=self._interval_minutes, job_id="monitor"
         )
         logger.info(
-            "Monitor agendado a cada %d min. Aguardando pregao...",
+            "Monitor agendado a cada %d min (UTC). Aguardando pregao...",
             self._interval_minutes,
         )
         try:

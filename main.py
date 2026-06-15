@@ -65,8 +65,12 @@ def build_broker(settings) -> BrokerClient:
     return AlpacaBroker(settings)
 
 
-def _build_risk_manager(broker, state, audit) -> RiskManager:
-    """Monta o RiskManager fixando o equity de inicio do dia (persistido)."""
+def _build_risk_manager(broker, state, audit, *, sizer=None) -> RiskManager:
+    """Monta o RiskManager fixando o equity de inicio do dia (persistido).
+
+    `sizer` (DynamicSizer) opcional liga o sizing por conviccao: quando presente,
+    a fracao de risco-por-trade passa a ser dirigida pela confianca da decisao.
+    """
     from datetime import datetime, timezone
     from decimal import Decimal
 
@@ -101,7 +105,7 @@ def _build_risk_manager(broker, state, audit) -> RiskManager:
         "system", "risk_init",
         payload={"start_equity": str(start_equity), "peak_equity": str(peak_equity)},
     )
-    return RiskManager(rs, guard)
+    return RiskManager(rs, guard, sizer=sizer)
 
 
 def build_app(
@@ -133,8 +137,29 @@ def build_app(
         ]
     )
 
+    # Sizing por conviccao (opcional, por config). Liga o "cerebro" ao caminho
+    # vivo: a confianca (regime + sinais + ML champion) dirige o risco-por-trade
+    # via DynamicSizer, sempre DENTRO dos caps do RiskManager. Sem FIMATHE aqui.
+    rs = get_risk_settings()
+    sizer = None
+    enricher = None
+    if rs.conviction_sizing:
+        from config.risk import build_dynamic_sizer
+        from integration.enricher import DecisionEnricher
+        from ml.model_store import load_promoted_classifier
+
+        sizer = build_dynamic_sizer(rs)
+        champion = load_promoted_classifier()  # None => ML em shadow (no-op)
+        enricher = DecisionEnricher(sizer=sizer, classifier=champion)
+        logger.info(
+            "Sizing por conviccao ATIVO (max %.1f%%/trade, floor %.2f) | ML champion: %s",
+            float(rs.conviction_max_risk_pct) * 100,
+            rs.conviction_confidence_floor,
+            "carregado" if champion is not None else "ausente (shadow)",
+        )
+
     # Camada de risco: circuit breakers + sizing. start_equity do dia persistido.
-    risk_manager = _build_risk_manager(broker, state, audit)
+    risk_manager = _build_risk_manager(broker, state, audit, sizer=sizer)
 
     # WheelStrategy so age em ativos com `wheel` na watchlist E se o gate de
     # elegibilidade (nivel de opcoes + liquidez) passar em runtime.
@@ -153,6 +178,8 @@ def build_app(
         signal_repo=signal_repo,
         risk_manager=risk_manager,
         audit=audit,
+        enricher=enricher,
+        assumed_stop_pct=rs.assumed_stop_pct,
     )
     executor = Executor(
         broker, trade_logger, kill_switch, order_repo=order_repo, audit=audit

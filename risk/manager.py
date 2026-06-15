@@ -37,9 +37,20 @@ class RiskDecision:
 
 
 class RiskManager:
-    def __init__(self, settings: RiskSettings, guard: PortfolioRiskGuard) -> None:
+    def __init__(
+        self,
+        settings: RiskSettings,
+        guard: PortfolioRiskGuard,
+        *,
+        sizer=None,
+    ) -> None:
         self._s = settings
         self._guard = guard
+        # DynamicSizer opcional (sizing por conviccao). Quando presente E uma
+        # `confidence` e passada ao assess(), a fracao de risco-por-trade vira
+        # funcao da confianca (Kelly). Ausente => sizing fixo legado (sem
+        # regressao: todos os caps e o caminho atual ficam identicos).
+        self._sizer = sizer
 
     @property
     def guard(self) -> PortfolioRiskGuard:
@@ -64,6 +75,8 @@ class RiskManager:
         price: Decimal | None,
         *,
         fractional: bool = False,
+        confidence: float | None = None,
+        win_loss_ratio: float | None = None,
     ) -> RiskDecision:
         # Saidas/protecoes sempre passam.
         if not self.is_risk_increasing(intent):
@@ -81,11 +94,36 @@ class RiskManager:
 
         if isinstance(intent, OptionOrderIntent):
             return self._assess_option(intent, equity, by_symbol, price)
-        return self._assess_equity_buy(intent, equity, by_symbol, price, fractional)
+        return self._assess_equity_buy(
+            intent, equity, by_symbol, price, fractional, confidence, win_loss_ratio
+        )
 
-    def _assess_equity_buy(self, intent, equity, by_symbol, price, fractional=False) -> RiskDecision:
+    def _risk_per_trade_pct(
+        self, confidence: float | None, win_loss_ratio: float | None
+    ) -> Decimal | None:
+        """Fracao de risco-por-trade deste trade.
+
+        Com sizer + confidence: dirigida pela confianca (Kelly). Sem edge
+        (confianca < floor ou Kelly 0) => None, que SINALIZA "nao operar".
+        Sem sizer/confidence => fracao FIXA legada (nunca None)."""
+        if self._sizer is not None and confidence is not None:
+            rp = self._sizer.risk_pct(confidence, win_loss_ratio)
+            if rp <= 0:
+                return None  # sem edge -> veto a montante
+            return Decimal(str(rp))
+        return self._s.risk_per_trade_pct
+
+    def _assess_equity_buy(
+        self, intent, equity, by_symbol, price, fractional=False,
+        confidence=None, win_loss_ratio=None,
+    ) -> RiskDecision:
         existing = by_symbol.get(intent.symbol)
         current_qty = existing.qty if existing else Decimal(0)
+
+        # Sizing por conviccao: sem edge => veta antes de qualquer ordem.
+        risk_pct = self._risk_per_trade_pct(confidence, win_loss_ratio)
+        if risk_pct is None:
+            return RiskDecision(False, f"sem edge (confianca {confidence:.2f})", None)
 
         # Cap por exposicao do simbolo.
         max_add = max_qty_for_exposure(
@@ -96,11 +134,13 @@ class RiskManager:
         final_qty = min(intent.qty, max_add)
 
         # Cap por risco-por-trade (fixed fractional ate o stop assumido): nunca
-        # arrisca mais que risk_per_trade_pct do equity num unico trade. So
-        # REDUZ a quantidade — alinha o sizing ao stop protetor que sera emitido.
+        # arrisca mais que `risk_pct` do equity num unico trade. So REDUZ a
+        # quantidade — alinha o sizing ao stop protetor que sera emitido. Com
+        # conviccao, `risk_pct` cresce ate conviction_max_risk_pct (edge alto)
+        # ou encolhe a 0 (sem edge, ja vetado acima).
         stop_price = price * (Decimal(1) - self._s.assumed_stop_pct)
         qty_risk = fixed_fractional_qty(
-            equity, self._s.risk_per_trade_pct, price, stop_price, fractional=fractional
+            equity, risk_pct, price, stop_price, fractional=fractional
         )
         if qty_risk > 0:
             final_qty = min(final_qty, qty_risk)

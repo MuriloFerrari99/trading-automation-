@@ -89,16 +89,38 @@ class AlpacaBroker(BrokerClient):
         latest = self._data.get_stock_latest_trade(req)
         return _to_decimal(latest[symbol.upper()].price)
 
+    # Barras de mercado aproximadas por dia de pregao, por timeframe — usado p/
+    # calcular uma janela `start` ampla o bastante para devolver `limit` barras.
+    _BARS_PER_DAY = {"1min": 390, "5min": 78, "15min": 26, "1hour": 7, "1day": 1}
+
     def get_bars(self, symbol: str, limit: int = 60, *, timeframe: str = "1Day") -> list[Decimal]:
         from alpaca.data.requests import StockBarsRequest
 
         symbol = symbol.upper()
         req = StockBarsRequest(
-            symbol_or_symbols=symbol, timeframe=self._timeframe(timeframe), limit=limit
+            symbol_or_symbols=symbol,
+            timeframe=self._timeframe(timeframe),
+            limit=limit,
+            start=self._lookback_start(timeframe, limit),
         )
         bars = self._data.get_stock_bars(req)
         data = getattr(bars, "data", {}).get(symbol, []) if bars else []
         return [_to_decimal(b.close) for b in data]
+
+    @classmethod
+    def _lookback_start(cls, timeframe: str, limit: int):
+        """`start` ASSAZ amplo p/ a Alpaca devolver `limit` barras.
+
+        Sem `start`, a API retorna so a janela recente (ex.: 1 barra diaria) — o
+        que deixava o classificador de regime sempre em UNKNOWN ao vivo. Estima
+        os dias de calendario a partir das barras/dia do timeframe, com folga
+        para fins de semana/feriados."""
+        from datetime import datetime, timedelta, timezone
+
+        bpd = cls._BARS_PER_DAY.get(timeframe.lower(), 1)
+        trading_days = limit / bpd
+        calendar_days = int(trading_days * 1.6) + 5  # folga p/ pregao fechado
+        return datetime.now(timezone.utc) - timedelta(days=calendar_days)
 
     @staticmethod
     def _timeframe(tf: str):

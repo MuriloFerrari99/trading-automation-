@@ -111,7 +111,9 @@ def run_continuous(
                 risk.begin_cycle(sim.get_account().equity)
                 intents = _apply_risk(intents, sim, risk)
             if decision is not None and intents:
-                intents = decision.process(intents, []).allowed
+                # Regime a partir de BARRAS REAIS ate o bar atual (sem look-ahead).
+                market_data = {symbol: sim.get_bars(symbol, 60)}
+                intents = decision.process(intents, [], market_data=market_data).allowed
             for it in intents:
                 sim.submit_order(it)
         sim.mark_equity()
@@ -200,13 +202,24 @@ def run_experiment(
         ]
         results.append(_aggregate("B_risk+stop", cost, metrics_b))
 
-        # C) +risco +stop +decisao (aprende online; veta combos negativos)
+        # C) +risco +stop +decisao. DUAS PASSADAS:
+        #   1) treino: roda a serie inteira p/ a DecisionPolicy acumular track
+        #      record (regime por BARRAS reais) — fecha o loop via FeedbackAgent.
+        #   2) avaliacao: roda de novo; agora a policy VETA combos negativos.
+        # Politica mais sensivel (min_samples menor) p/ agir com a amostra que ha.
         db = Database(":memory:")
         dlog = DecisionLog(connection=db.conn)
-        decision = DecisionIntelligence(dlog, DecisionPolicy())
+        decision = DecisionIntelligence(dlog, DecisionPolicy(min_samples=6))
         feedback = FeedbackAgent(dlog)
         cfg_c = RunConfig("risk+decision", use_risk=True, use_stop=True, commission_bps=cost, slippage_bps=cost)
-        metrics_c = [
+
+        for sym, ohlc in data.items():  # passada 1 — treino (descarta metricas)
+            run_continuous(sym, ohlc, cfg_c, decision=decision, feedback=feedback)
+
+        vetoed = _vetoed_combos(dlog)
+        logger.info("Custo %.0fbps: policy aprendeu a vetar %d combo(s): %s", cost, len(vetoed), vetoed)
+
+        metrics_c = [  # passada 2 — avaliacao OOS com o gate ativo
             m for sym, ohlc in data.items()
             if (m := run_continuous(sym, ohlc, cfg_c, decision=decision, feedback=feedback)) is not None
         ]
@@ -214,6 +227,18 @@ def run_experiment(
         db.close()
 
     return results
+
+
+def _vetoed_combos(dlog: DecisionLog) -> list[str]:
+    """Combos estrategia@regime que a policy aprendeu a vetar (expectancy < 0)."""
+    from feedback.evaluation import evaluate
+
+    report = evaluate(dlog.all_records())
+    out = []
+    for (strat, regime), stats in report.by_strategy_regime.items():
+        if stats.n_trades >= 6 and stats.expectancy < 0:
+            out.append(f"{strat}@{regime}(n={stats.n_trades},exp={stats.expectancy:.1f})")
+    return out
 
 
 def format_experiment(results: list[ConfigResult]) -> str:

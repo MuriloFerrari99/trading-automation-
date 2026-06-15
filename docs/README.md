@@ -15,6 +15,7 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 | 05 | [research/05-arquitetura-agentes.md](research/05-arquitetura-agentes.md) | Arquitetura multi-agente (Planejador/Executor/Monitor), comunicação, `AgentOrchestrator`, scheduling, persistência |
 | 06 | [research/06-backtesting-testes.md](research/06-backtesting-testes.md) | Backtesting (frameworks), vieses, métricas, paper trading, testes pytest com mock da Alpaca |
 | 07 | [research/07-fimathe-forex.md](research/07-fimathe-forex.md) | Metodologia FIMATHE (forex/ouro): canais, zona neutra, virada de mão, linhas do Equador, barra elefante, fatiamento + adaptação ouro→pares de moedas |
+| 08 | [research/08-fimathe-engine.md](research/08-fimathe-engine.md) | Spec da classe `FimatheEngine`: API (canais/ZN/PCM/Fibonacci/sinais/stops), features geradas e uso rule-based ou como feature generator p/ ML |
 
 **Fontes brutas:** [research/fontes/](research/fontes/) — transcrições de áudio que embasam docs (ex.: `fimathe-ouro-transcricao.txt`).
 

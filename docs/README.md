@@ -14,6 +14,9 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 | 04 | [research/04-wheel-opcoes.md](research/04-wheel-opcoes.md) | Wheel Strategy: CSP → covered call, seleção por delta/DTE, greeks, suporte a opções na Alpaca |
 | 05 | [research/05-arquitetura-agentes.md](research/05-arquitetura-agentes.md) | Arquitetura multi-agente (Planejador/Executor/Monitor), comunicação, `AgentOrchestrator`, scheduling, persistência |
 | 06 | [research/06-backtesting-testes.md](research/06-backtesting-testes.md) | Backtesting (frameworks), vieses, métricas, paper trading, testes pytest com mock da Alpaca |
+| 07 | [research/07-fimathe-forex.md](research/07-fimathe-forex.md) | Metodologia FIMATHE (forex/ouro): canais, zona neutra, virada de mão, linhas do Equador, barra elefante, fatiamento + adaptação ouro→pares de moedas |
+
+**Fontes brutas:** [research/fontes/](research/fontes/) — transcrições de áudio que embasam docs (ex.: `fimathe-ouro-transcricao.txt`).
 
 ## Descobertas que mudam decisões do projeto
 
@@ -22,6 +25,7 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 3. **OpenSquad ≠ Python.** O OpenSquad público ([github.com/brunomcps/opensquad](https://github.com/brunomcps/opensquad)) é um framework **TypeScript/Node.js orquestrado por CLI/MCP**, não uma biblioteca Python com SDK para despachar agentes em runtime. Existem vários projetos homônimos (agent-squad, AWS Agent Squad, Squad do Copilot). **Decisão:** começar com um `LocalOrchestrator` em Python por trás da interface `AgentOrchestrator`; integrar o OpenSquad depois, quando você confirmar qual é e fornecer a doc. Não há API inventada no código. (doc 05)
 4. **Smart money tem latência estrutural.** Disclosure do Congresso atrasa até ~45 dias e 13F é foto trimestral só de posições long — tratar como **um sinal entre vários, nunca execução automática cega**. SEC EDGAR é a fonte gratuita confiável (exige header `User-Agent`); Capitol Trades não tem API pública oficial; Quiver/Unusual Whales têm tiers pagos. (doc 03)
 5. **Backtest antes de paper, paper antes de live.** Backtrader está estagnado (último release 2019, mas funcional); avaliar `Backtesting.py`/`VectorBT`/`NautilusTrader` — confirmar manutenção no GitHub antes de fixar. (doc 06)
+6. **FIMATHE é forex/ouro, fora do escopo Alpaca.** A metodologia (doc 07) opera **pares de moedas e XAU/USD em MetaTrader** — a **Alpaca não negocia forex**. É conhecimento de metodologia (e base p/ backtest das partes determinísticas num feed forex/MT5), **não** um módulo do bot Alpaca atual. Boa parte do método é discricionária; só um subconjunto (canal/ciclos/stop/take/disjuntor) é determinístico. (doc 07)
 
 ## Caminho para virar skills
 

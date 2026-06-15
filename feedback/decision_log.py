@@ -38,12 +38,19 @@ CREATE TABLE IF NOT EXISTS decisions (
     realized_pnl    TEXT,
     return_pct      REAL,
     closed_at       TEXT,
-    outcome_note    TEXT
+    outcome_note    TEXT,
+    -- lote (para matching FIFO de vendas contra compras):
+    qty             TEXT,               -- qty da ordem; setada no fill de compra
+    remaining_qty   TEXT                -- qty ainda aberta; 0 => totalmente fechada
 );
 CREATE INDEX IF NOT EXISTS idx_decisions_strategy ON decisions(strategy);
 CREATE INDEX IF NOT EXISTS idx_decisions_regime   ON decisions(regime);
 CREATE INDEX IF NOT EXISTS idx_decisions_coid     ON decisions(client_order_id);
+CREATE INDEX IF NOT EXISTS idx_decisions_symbol   ON decisions(symbol);
 """
+
+# Colunas adicionadas depois da v1 — migração idempotente para bancos existentes.
+_MIGRATION_COLUMNS = (("qty", "TEXT"), ("remaining_qty", "TEXT"))
 
 
 def _utcnow_iso() -> str:
@@ -75,6 +82,17 @@ class DecisionLog:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         with self._conn:
             self._conn.executescript(SCHEMA)
+        self._migrate()
+
+    def _migrate(self) -> None:
+        """Adiciona colunas novas a bancos pre-existentes (ALTER idempotente).
+        CREATE TABLE IF NOT EXISTS nao altera tabela ja criada — daqui vem a
+        coluna de lote em DBs antigos."""
+        existing = {row["name"] for row in self._conn.execute("PRAGMA table_info(decisions)")}
+        with self._conn:
+            for name, coltype in _MIGRATION_COLUMNS:
+                if name not in existing:
+                    self._conn.execute(f"ALTER TABLE decisions ADD COLUMN {name} {coltype}")
 
     # ------------------------------ escrita ------------------------------ #
 
@@ -145,6 +163,41 @@ class DecisionLog:
                 (_dec_to_str(entry_price), coid, OutcomeStatus.OPEN.value),
             )
             return cur.rowcount
+
+    def set_qty_by_client_order_id(self, coid: str, qty: Decimal) -> int:
+        """Fixa qty/remaining_qty (lote) nas decisoes ABERTAS do client_order_id,
+        apenas enquanto ainda nao setado (idempotente em retry/reconexao).
+        Retorna quantas linhas foram atualizadas."""
+        with self._conn:
+            cur = self._conn.execute(
+                """
+                UPDATE decisions SET qty = ?, remaining_qty = ?
+                WHERE client_order_id = ? AND outcome_status = ? AND qty IS NULL
+                """,
+                (_dec_to_str(qty), _dec_to_str(qty), coid, OutcomeStatus.OPEN.value),
+            )
+            return cur.rowcount
+
+    def open_buy_lots(self, symbol: str) -> list[dict]:
+        """Lotes de COMPRA ainda abertos do simbolo, em ordem FIFO (mais antigo
+        primeiro). Base do matching lote-a-lote de vendas contra compras."""
+        cur = self._conn.execute(
+            """
+            SELECT * FROM decisions
+            WHERE upper(symbol) = upper(?) AND action = 'buy' AND outcome_status = ?
+            ORDER BY ts ASC, id ASC
+            """,
+            (symbol, OutcomeStatus.OPEN.value),
+        )
+        return [dict(r) for r in cur.fetchall()]
+
+    def reduce_remaining(self, decision_id: int, new_remaining: Decimal) -> None:
+        """Abate a qty ainda aberta de um lote parcialmente vendido (segue OPEN)."""
+        with self._conn:
+            self._conn.execute(
+                "UPDATE decisions SET remaining_qty = ? WHERE id = ?",
+                (_dec_to_str(new_remaining), decision_id),
+            )
 
     def attach_outcome_by_client_order_id(self, coid: str, outcome: Outcome) -> int:
         """Anexa resultado a decisao(oes) ligada(s) a um client_order_id.

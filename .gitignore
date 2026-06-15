@@ -26,3 +26,7 @@ logs/
 .DS_Store
 .vscode/
 .idea/
+
+# Simulacao (cache de dados e relatorios gerados)
+data/cache/
+data/sim_report.txt

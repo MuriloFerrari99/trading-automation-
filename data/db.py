@@ -105,7 +105,24 @@ class Database:
 
     def _init_schema(self) -> None:
         with self._conn:
+            self._migrate(self._conn)
             self._conn.executescript(SCHEMA)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> None:
+        """Migracao leve de schema para DBs pre-existentes.
+
+        A tabela `orders` ganhou colunas (client_order_id, etc.). Como ela e
+        reconstruivel via reconciliacao com o broker (fonte de verdade), se o
+        schema estiver defasado simplesmente recriamos a tabela. Nao mexe em
+        audit_log/trade_log/signals/positions (historico preservado).
+        """
+        cur = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='orders'")
+        if cur.fetchone() is None:
+            return  # tabela ainda nao existe; SCHEMA cria do zero
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(orders)")}
+        if "client_order_id" not in cols:
+            conn.execute("DROP TABLE orders")
 
     @property
     def conn(self) -> sqlite3.Connection:

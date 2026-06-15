@@ -19,6 +19,7 @@ from agents.executor import Executor
 from agents.monitor import Monitor
 from agents.planner import Planner
 from broker.base import BrokerClient
+from config.risk import get_risk_settings
 from config.settings import LiveTradingBlockedError, get_settings
 from config.watchlist import load_watchlist
 from core.kill_switch import KillSwitch
@@ -33,6 +34,8 @@ from data.trade_logger import TradeLogger
 from orchestration.base import AgentOrchestrator
 from orchestration.factory import build_orchestrator
 from orchestration.reconcile import reconcile
+from risk.manager import RiskManager
+from risk.portfolio_guard import PortfolioRiskGuard
 from strategies.ladder_buys import LadderBuysStrategy
 from strategies.signals.base import SignalService
 from strategies.signals.congress import CongressTradingProvider, StaticCongressSource
@@ -57,6 +60,32 @@ def build_broker(settings) -> BrokerClient:
     from broker.alpaca_broker import AlpacaBroker
 
     return AlpacaBroker(settings)
+
+
+def _build_risk_manager(broker, state, audit) -> RiskManager:
+    """Monta o RiskManager fixando o equity de inicio do dia (persistido)."""
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    rs = get_risk_settings()
+    equity = broker.get_account().equity
+    today = datetime.now(timezone.utc).date().isoformat()
+    key = f"risk_start_equity:{today}"
+    stored = state.get_decimal(key)
+    if stored is None:
+        state.set_decimal(key, equity)
+        start_equity = equity
+    else:
+        start_equity = stored
+    guard = PortfolioRiskGuard(
+        start_equity=start_equity if start_equity > 0 else Decimal("1"),
+        daily_loss_pct=rs.daily_loss_limit_pct,
+        max_dd_pct=rs.max_drawdown_pct,
+        max_per_symbol_pct=rs.max_per_symbol_pct,
+        max_heat_pct=rs.max_portfolio_heat_pct,
+    )
+    audit.write("system", "risk_init", payload={"start_equity": str(start_equity)})
+    return RiskManager(rs, guard)
 
 
 def build_app(
@@ -88,6 +117,9 @@ def build_app(
         ]
     )
 
+    # Camada de risco: circuit breakers + sizing. start_equity do dia persistido.
+    risk_manager = _build_risk_manager(broker, state, audit)
+
     # WheelStrategy so age em ativos com `wheel` na watchlist E se o gate de
     # elegibilidade (nivel de opcoes + liquidez) passar em runtime.
     strategies = [TrailingStopStrategy(), LadderBuysStrategy(), WheelStrategy()]
@@ -98,6 +130,8 @@ def build_app(
         strategies,
         signal_service=signal_service,
         signal_repo=signal_repo,
+        risk_manager=risk_manager,
+        audit=audit,
     )
     executor = Executor(
         broker, trade_logger, kill_switch, order_repo=order_repo, audit=audit

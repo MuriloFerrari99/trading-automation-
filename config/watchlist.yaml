@@ -1,0 +1,8 @@
+# Watchlist do MVP — ativos monitorados e parametros por ativo.
+# trailing_stop_pct: percentual abaixo da maxima (high-water) em que o stop
+# dispara a venda. Ex: 10.0 => vende se o preco cair 10% abaixo da maxima.
+symbols:
+  - symbol: AAPL
+    trailing_stop_pct: 10.0
+  - symbol: MSFT
+    trailing_stop_pct: 8.0

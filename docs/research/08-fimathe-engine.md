@@ -210,10 +210,16 @@ def get_features_for_ml(self, df: pd.DataFrame) -> pd.DataFrame:
 
 ## 8. Próximos passos / melhorias
 
-- Detecção automática de swings com `scipy.signal.argrelextrema`.
+- ✅ **Detecção de swings por pivôs** (`swing_method="pivots"`) — implementada em numpy puro
+  (equivalente a `scipy.signal.argrelextrema`, **sem a dependência**) e, crucialmente, **causal**: um pivô
+  só vira referência `swing_period` velas depois (tempo de confirmação), evitando o **look-ahead bias** que
+  a versão ingênua (`argrelextrema` + `ffill`) introduz. `swing_method="rolling"` segue como padrão.
+  *(Nota: `pandas_ta` foi descartado — usa `from numpy import NaN`, removido no numpy 2.0; quebraria neste
+  ambiente. RSI/ATR/ADX são calculados à mão, sem dependência.)*
 - Canais dinâmicos com **regressão linear**.
 - Suporte a **Order Blocks** e **Fair Value Gaps (FVG)**.
 - **Versão com estado** (para live trading).
+- Alvos (`take_profit_2`) em níveis de Fibonacci (R:R variável) em vez de 2R fixo.
 
 ---
 

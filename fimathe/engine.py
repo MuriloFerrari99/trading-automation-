@@ -49,6 +49,7 @@ class FimatheEngine:
         min_atr_multiplier: float = 0.5,
         risk_reward_min: float = 2.0,
         *,
+        swing_method: str = "rolling",
         pip_size: float = 0.0001,
         account_balance: float = 10_000.0,
         pip_value: float = 10.0,
@@ -56,6 +57,9 @@ class FimatheEngine:
         atr_period: int = 14,
         adx_period: int = 14,
     ) -> None:
+        if swing_method not in ("rolling", "pivots"):
+            raise ValueError("swing_method deve ser 'rolling' ou 'pivots'")
+        self.swing_method = swing_method
         self.swing_period = swing_period
         self.zone_neutra_factor = zone_neutra_factor
         self.pcm_confirmation = pcm_confirmation
@@ -92,9 +96,17 @@ class FimatheEngine:
         sp = self.swing_period
         high, low, close = df["high"], df["low"], df["close"]
 
-        # Canal das velas ANTERIORES (shift 1) -> rompimento detectavel.
-        df["swing_high"] = high.rolling(sp, min_periods=sp).max().shift(1)
-        df["swing_low"] = low.rolling(sp, min_periods=sp).min().shift(1)
+        if self.swing_method == "pivots":
+            # Swings por PIVOS (local extrema), versao CAUSAL: um pivo so fica
+            # disponivel `swing_period` velas depois (tempo de confirmacao),
+            # evitando look-ahead. Equivalente a scipy.argrelextrema, sem a dep.
+            df = self.detect_swings_pivots(df)
+        else:
+            # Canal das `swing_period` velas ANTERIORES (shift 1) -> rompimento
+            # da vela atual e detectavel.
+            df["swing_high"] = high.rolling(sp, min_periods=sp).max().shift(1)
+            df["swing_low"] = low.rolling(sp, min_periods=sp).min().shift(1)
+
         df["upper_channel"] = df["swing_high"]
         df["lower_channel"] = df["swing_low"]
 
@@ -110,6 +122,43 @@ class FimatheEngine:
         below = close < df["lower_channel"]
         df["price_position"] = np.where(above, "acima", np.where(below, "abaixo", "dentro"))
         df["price_position_code"] = np.where(above, 1, np.where(below, -1, 0))
+        return df
+
+    @staticmethod
+    def _local_extrema(values: np.ndarray, order: int, greater: bool) -> np.ndarray:
+        """Indices de extremos locais (pivos), estritos vs `order` vizinhos de
+        cada lado. Equivalente a scipy.signal.argrelextrema, sem a dependencia."""
+        n = len(values)
+        idx = []
+        for i in range(order, n - order):
+            center = values[i]
+            window = values[i - order : i + order + 1]
+            neighbors = np.delete(window, order)  # remove o proprio centro
+            if greater:
+                if center > neighbors.max():
+                    idx.append(i)
+            elif center < neighbors.min():
+                idx.append(i)
+        return np.array(idx, dtype=int)
+
+    def detect_swings_pivots(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Swings por pivos, CAUSAL: o pivo so vira referencia `swing_period`
+        velas apos ocorrer (tempo de confirmacao) -> sem look-ahead."""
+        order = self.swing_period
+        high, low = df["high"].to_numpy(), df["low"].to_numpy()
+        n = len(df)
+        sh = pd.Series(np.nan, index=df.index)
+        sl = pd.Series(np.nan, index=df.index)
+        for i in self._local_extrema(high, order, greater=True):
+            j = i + order  # disponivel so apos a confirmacao
+            if j < n:
+                sh.iat[j] = high[i]
+        for i in self._local_extrema(low, order, greater=False):
+            j = i + order
+            if j < n:
+                sl.iat[j] = low[i]
+        df["swing_high"] = sh.ffill()
+        df["swing_low"] = sl.ffill()
         return df
 
     # ------------------------------------------------------------------ #

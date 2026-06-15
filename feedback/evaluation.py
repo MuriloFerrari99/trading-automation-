@@ -87,6 +87,12 @@ class Report:
     overall: GroupStats
     by_strategy: dict[str, GroupStats]
     by_regime: dict[str, GroupStats]
+    # Cruzamento estrategia x regime: a granularidade que o gate de decisao usa
+    # ("esta estrategia, NESTE regime, tem edge?"). Chave: (strategy, regime).
+    by_strategy_regime: dict[tuple[str, str], GroupStats] = field(default_factory=dict)
+
+    def combo(self, strategy: str, regime: str) -> GroupStats | None:
+        return self.by_strategy_regime.get((strategy, regime))
 
 
 def _accumulate(stats: GroupStats, row: dict) -> None:
@@ -136,6 +142,7 @@ def evaluate(records: list[dict]) -> Report:
     overall = GroupStats(label="TOTAL")
     by_strategy: dict[str, GroupStats] = defaultdict(lambda: GroupStats(label=""))
     by_regime: dict[str, GroupStats] = defaultdict(lambda: GroupStats(label=""))
+    by_combo: dict[tuple[str, str], GroupStats] = defaultdict(lambda: GroupStats(label=""))
 
     for row in records:
         _accumulate(overall, row)
@@ -145,14 +152,21 @@ def evaluate(records: list[dict]) -> Report:
         r = by_regime[row["regime"]]
         r.label = row["regime"]
         _accumulate(r, row)
+        key = (row["strategy"], row["regime"])
+        c = by_combo[key]
+        c.label = f"{row['strategy']}@{row['regime']}"
+        _accumulate(c, row)
 
-    for grp in [overall, *by_strategy.values(), *by_regime.values()]:
+    for grp in [
+        overall, *by_strategy.values(), *by_regime.values(), *by_combo.values()
+    ]:
         _finalize_drawdown(grp)
 
     return Report(
         overall=overall,
         by_strategy=dict(by_strategy),
         by_regime=dict(by_regime),
+        by_strategy_regime=dict(by_combo),
     )
 
 
@@ -181,6 +195,15 @@ def format_report(report: Report) -> str:
     lines.append("Por regime de mercado:")
     for r in sorted(report.by_regime.values(), key=lambda g: g.total_pnl, reverse=True):
         lines.append("  " + _fmt_row(r))
+    losers = [
+        c for c in report.by_strategy_regime.values()
+        if c.n_trades > 0 and c.expectancy < 0
+    ]
+    if losers:
+        lines.append("-" * 96)
+        lines.append("Combos estrategia@regime com expectancy NEGATIVA (candidatos a veto):")
+        for c in sorted(losers, key=lambda g: g.expectancy):
+            lines.append("  " + _fmt_row(c))
     lines.append("=" * 96)
     lines.append(
         "Legenda: dec=decisoes trades=fechados skip=nao-operou win%=acerto "

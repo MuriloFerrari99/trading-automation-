@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from agents.executor import Executor
 from agents.planner import Planner
+from intelligence.engine import DecisionIntelligence
 from orchestration.base import AgentOrchestrator
 from orchestration.local_orchestrator import LocalOrchestrator
 from orchestration.opensquad_orchestrator import OpenSquadOrchestrator, OrchestratorBridge
@@ -23,10 +24,11 @@ def build_orchestrator(
     executor: Executor,
     *,
     bridge: OrchestratorBridge | None = None,
+    intelligence: DecisionIntelligence | None = None,
 ) -> AgentOrchestrator:
     key = (name or LOCAL).strip().lower()
     if key == LOCAL:
-        return LocalOrchestrator(planner, executor)
+        return LocalOrchestrator(planner, executor, intelligence=intelligence)
     if key == OPENSQUAD:
         return OpenSquadOrchestrator(planner, executor, bridge=bridge)
     raise ValueError(

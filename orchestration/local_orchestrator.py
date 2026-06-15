@@ -15,15 +15,25 @@ import logging
 
 from agents.executor import Executor
 from agents.planner import Planner
+from intelligence.engine import DecisionIntelligence
 from orchestration.base import AgentOrchestrator, CycleResult
 
 logger = logging.getLogger("orchestrator.local")
 
 
 class LocalOrchestrator(AgentOrchestrator):
-    def __init__(self, planner: Planner, executor: Executor) -> None:
+    def __init__(
+        self,
+        planner: Planner,
+        executor: Executor,
+        *,
+        intelligence: DecisionIntelligence | None = None,
+    ) -> None:
         self._planner = planner
         self._executor = executor
+        # Camada de decisao (opcional). Quando ausente, o comportamento e
+        # exatamente o anterior — nenhuma regressao.
+        self._intelligence = intelligence
 
     def run_cycle(self) -> CycleResult:
         # 1) Sinais (Nivel 2): coletados e registrados como SUGESTAO. Nao
@@ -32,10 +42,17 @@ class LocalOrchestrator(AgentOrchestrator):
 
         # 2) Estrategias (Nivel 1): geram intencoes a partir de dados de mercado.
         intents = self._planner.plan()
+
+        # 3) Camada de decisao: classifica regime, registra a decisao e VETA
+        #    combos estrategia@regime com edge negativo comprovado. Sinais
+        #    apenas modulam a confianca — nunca criam trades.
+        if self._intelligence is not None:
+            intents = self._intelligence.process(intents, signals).allowed
+
         if not intents:
-            logger.debug("Nenhuma intencao gerada neste ciclo.")
+            logger.debug("Nenhuma intencao a executar neste ciclo.")
             return CycleResult(intents=[], results=[], signals=signals)
 
-        # 3) Execucao: somente intencoes de estrategia chegam ao Executor.
+        # 4) Execucao: somente intencoes permitidas chegam ao Executor.
         results = self._executor.execute_many(intents)
         return CycleResult(intents=intents, results=results, signals=signals)

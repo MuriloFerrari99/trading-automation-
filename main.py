@@ -32,6 +32,9 @@ from data.signal_repo import SignalRepository
 from data.state_repo import StateRepository
 from data.trade_logger import TradeLogger
 from orchestration.base import AgentOrchestrator
+from feedback.decision_log import DecisionLog
+from intelligence.decision_policy import DecisionPolicy
+from intelligence.engine import DecisionIntelligence
 from orchestration.factory import build_orchestrator
 from orchestration.reconcile import reconcile
 from risk.manager import RiskManager
@@ -136,9 +139,20 @@ def build_app(
     executor = Executor(
         broker, trade_logger, kill_switch, order_repo=order_repo, audit=audit
     )
+
+    # Camada de decisao (loop de feedback + gate por regime). Registra TODA
+    # decisao e veta combos estrategia@regime com edge negativo comprovado.
+    # Compartilha a conexao do Database (tabela `decisions` no mesmo SQLite).
+    decision_log = DecisionLog(connection=db.conn)
+    intelligence = DecisionIntelligence(
+        decision_log, DecisionPolicy(), price_provider=broker.get_last_price
+    )
+
     # Orquestrador selecionado por config (factory). Trocar p/ OpenSquad depois
     # e so mudar ORCHESTRATOR no .env (e fornecer um OrchestratorBridge).
-    orchestrator = build_orchestrator(orchestrator_name, planner, executor)
+    orchestrator = build_orchestrator(
+        orchestrator_name, planner, executor, intelligence=intelligence
+    )
 
     clock = MarketClock(broker)
     monitor = Monitor(orchestrator, clock, interval_minutes=MONITOR_INTERVAL_MINUTES)

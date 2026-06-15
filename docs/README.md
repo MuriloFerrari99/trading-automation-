@@ -17,6 +17,7 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 | 07 | [research/07-fimathe-forex.md](research/07-fimathe-forex.md) | Metodologia FIMATHE (forex/ouro): canais, zona neutra, virada de mão, linhas do Equador, barra elefante, fatiamento + adaptação ouro→pares de moedas |
 | 08 | [research/08-fimathe-engine.md](research/08-fimathe-engine.md) | Spec da classe `FimatheEngine`: API (canais/ZN/PCM/Fibonacci/sinais/stops), features geradas e uso rule-based ou como feature generator p/ ML |
 | 09 | [research/09-loop-de-feedback.md](research/09-loop-de-feedback.md) | **Camada 0 (implementada):** loop de feedback — registro decisão+contexto+resultado, classificador de regime e avaliação por estratégia/regime (pacote `feedback/`) |
+| 10 | [research/10-camada-decisao.md](research/10-camada-decisao.md) | **Camada de decisão (implementada):** gate por regime que veta combos estratégia×regime com edge negativo + score por sinais (pacote `intelligence/`), fiado no `LocalOrchestrator`/`main` |
 
 **Fontes brutas:** [research/fontes/](research/fontes/) — transcrições de áudio que embasam docs (ex.: `fimathe-ouro-transcricao.txt`).
 

@@ -12,8 +12,12 @@ from dataclasses import dataclass
 
 from broker.base import BrokerClient
 from config.watchlist import Watchlist
-from core.models import OrderIntent
+from core.models import OptionOrderIntent, OrderIntent
 from data.state_repo import StateRepository
+
+# Uma estrategia pode emitir intencoes de acoes (OrderIntent) e/ou de opcoes
+# (OptionOrderIntent). O Executor despacha por tipo.
+TradeIntent = OrderIntent | OptionOrderIntent
 
 
 @dataclass
@@ -30,5 +34,5 @@ class Strategy(ABC):
     name: str = "base"
 
     @abstractmethod
-    def evaluate(self, ctx: StrategyContext) -> list[OrderIntent]:
+    def evaluate(self, ctx: StrategyContext) -> list[TradeIntent]:
         """Avalia o mercado e retorna intencoes de ordem (possivelmente vazio)."""

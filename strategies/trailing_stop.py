@@ -33,6 +33,8 @@ class TrailingStopStrategy(Strategy):
         intents: list[OrderIntent] = []
 
         for item in ctx.watchlist.items:
+            if item.trailing_stop_pct is None:
+                continue  # ativo sem trailing stop configurado
             symbol = item.symbol
             key = high_water_key(symbol)
 

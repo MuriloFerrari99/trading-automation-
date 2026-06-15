@@ -1,12 +1,13 @@
-"""Testes da estrategia Trailing Stop."""
+"""Testes da estrategia Trailing Stop (nativo Alpaca)."""
 
 from __future__ import annotations
 
 from decimal import Decimal
 
-from core.models import OrderSide
+from broker.base import BrokerOrder
+from core.models import OrderSide, OrderType
 from strategies.base import StrategyContext
-from strategies.trailing_stop import TrailingStopStrategy, high_water_key
+from strategies.trailing_stop import TrailingStopStrategy
 
 
 def _ctx(broker, state, watchlist):
@@ -19,44 +20,49 @@ def test_no_position_no_intents(broker, state, watchlist):
     assert intents == []
 
 
-def test_no_trigger_above_stop(broker, state, watchlist):
+def test_places_native_trailing_stop_when_holding(broker, state, watchlist):
     broker.seed_position("AAPL", qty=Decimal("10"), avg_entry_price=Decimal("100"))
-    broker.set_price("AAPL", "105")  # subiu; stop = 105*0.9 = 94.5
+    broker.set_price("AAPL", "105")
     intents = TrailingStopStrategy().evaluate(_ctx(broker, state, watchlist))
-    assert intents == []
-    # high-water deve ter sido registrado em 105
-    assert state.get_decimal(high_water_key("AAPL")) == Decimal("105")
+    assert len(intents) == 1
+    intent = intents[0]
+    assert intent.side == OrderSide.SELL
+    assert intent.order_type == OrderType.TRAILING_STOP
+    assert intent.qty == Decimal("10")
+    assert intent.trail_percent == Decimal("10")  # 0.10 -> 10%
 
 
-def test_stop_follows_price_up_then_triggers(broker, state, watchlist):
-    strat = TrailingStopStrategy()
+def test_does_not_duplicate_when_trailing_already_open(broker, state, watchlist):
     broker.seed_position("AAPL", qty=Decimal("10"), avg_entry_price=Decimal("100"))
+    broker.set_price("AAPL", "105")
+    # ja existe uma trailing stop aberta no broker p/ AAPL
+    broker.seed_open_order(
+        BrokerOrder(
+            broker_order_id="t1", client_order_id="x", symbol="AAPL", side="sell",
+            qty=Decimal("10"), filled_qty=Decimal("0"), status="new",
+            order_type="trailing_stop",
+        )
+    )
+    intents = TrailingStopStrategy().evaluate(_ctx(broker, state, watchlist))
+    assert intents == []  # ja protegido, nao duplica
 
-    # Sobe a 120 -> high-water 120, stop 108. Sem disparo.
-    broker.set_price("AAPL", "120")
-    assert strat.evaluate(_ctx(broker, state, watchlist)) == []
-    assert state.get_decimal(high_water_key("AAPL")) == Decimal("120")
 
-    # Cai para 110 (> stop 108). Ainda sem disparo; stop NAO desce.
-    broker.set_price("AAPL", "110")
-    assert strat.evaluate(_ctx(broker, state, watchlist)) == []
-    assert state.get_decimal(high_water_key("AAPL")) == Decimal("120")
+def test_full_protection_flow_places_once(broker, state, watchlist):
+    """Em ciclos seguidos, coloca a trailing UMA vez e nao reenvia."""
+    from agents.executor import Executor
+    from core.kill_switch import KillSwitch
+    from data.db import Database
+    from data.trade_logger import TradeLogger
 
-    # Cai para 107 (< stop 108). Dispara venda da posicao inteira.
-    broker.set_price("AAPL", "107")
+    broker.seed_position("AAPL", qty=Decimal("10"), avg_entry_price=Decimal("100"))
+    broker.set_price("AAPL", "105")
+    ks = KillSwitch("/tmp/__no_kill__")
+    ex = Executor(broker, TradeLogger(Database(":memory:")), ks)
+    strat = TrailingStopStrategy()
+
+    # ciclo 1: coloca a trailing
     intents = strat.evaluate(_ctx(broker, state, watchlist))
     assert len(intents) == 1
-    assert intents[0].side == OrderSide.SELL
-    assert intents[0].qty == Decimal("10")
-    assert intents[0].strategy == "trailing_stop"
-    # apos disparo o high-water e resetado
-    assert state.get_decimal(high_water_key("AAPL")) is None
-
-
-def test_high_water_initialized_from_entry(broker, state, watchlist):
-    # preco atual abaixo da entrada => stop baseado na entrada
-    broker.seed_position("AAPL", qty=Decimal("5"), avg_entry_price=Decimal("100"))
-    broker.set_price("AAPL", "89")  # stop = 100*0.9 = 90; 89 < 90 dispara
-    intents = TrailingStopStrategy().evaluate(_ctx(broker, state, watchlist))
-    assert len(intents) == 1
-    assert intents[0].side == OrderSide.SELL
+    ex.execute(intents[0])
+    # ciclo 2: ja existe trailing aberta no broker => nao reenvia
+    assert strat.evaluate(_ctx(broker, state, watchlist)) == []

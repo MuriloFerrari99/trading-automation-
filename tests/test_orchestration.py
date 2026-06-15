@@ -18,22 +18,20 @@ def _build(broker, state, trade_logger, kill_switch, watchlist):
     return LocalOrchestrator(planner, executor)
 
 
-def test_full_cycle_triggers_sell(broker, state, trade_logger, kill_switch, watchlist):
+def test_full_cycle_places_native_trailing(broker, state, trade_logger, kill_switch, watchlist):
     broker.seed_position("AAPL", qty=Decimal("10"), avg_entry_price=Decimal("100"))
     broker.set_price("AAPL", "120")
     orch = _build(broker, state, trade_logger, kill_switch, watchlist)
 
-    # primeiro ciclo: high-water=120, sem disparo
+    # primeiro ciclo: coloca a trailing stop nativa (fica aberta no broker)
     r1 = orch.run_cycle()
-    assert r1.executed_count == 0
+    assert r1.intents_count == 1
+    assert r1.executed_count == 1
+    assert len(broker.get_open_orders()) == 1  # protecao colocada
 
-    # preco despenca: dispara venda
-    broker.set_price("AAPL", "100")  # stop=108; 100<108
+    # segundo ciclo: ja protegido => nao reenvia
     r2 = orch.run_cycle()
-    assert r2.intents_count == 1
-    assert r2.executed_count == 1
-    assert broker.get_position("AAPL") is None  # posicao fechada
-    assert len(trade_logger.recent()) == 1
+    assert r2.intents_count == 0
 
 
 def test_monitor_skips_when_market_closed(broker, state, trade_logger, kill_switch, watchlist):

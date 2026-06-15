@@ -1,14 +1,18 @@
-"""Estrategia de Trailing Stop.
+"""Estrategia de Trailing Stop — NATIVO da Alpaca (server-side).
 
-Para cada ativo da watchlist em que ha posicao comprada:
-- Mantem um high-water mark (a maxima observada) persistido em `state`.
-- O stop = high_water * (1 - trailing_pct). Como o high_water nunca diminui,
-  o stop nunca desce (sobe junto com o preco, conforme o briefing).
-- Se o preco atual <= stop, gera uma OrderIntent de VENDA da posicao inteira
-  (ordem a mercado) e reseta o high-water.
+Conforme decisao de arquitetura (doc 02 §1.3): usar o trailing stop NATIVO da
+Alpaca, que sobrevive a um crash do bot. Em vez de o bot calcular o high-water
+e vender a mercado, ele coloca UMA ordem `trailing_stop` (com trail_percent) e
+o broker rastreia a maxima e dispara sozinho.
 
-O ajuste do stop acontece implicitamente a cada ciclo: o Monitor chama a
-estrategia periodicamente, ela atualiza o high-water e recalcula o gatilho.
+Logica por ativo da watchlist com trailing configurado:
+- Sem posicao comprada: nada a proteger.
+- Com posicao E sem ordem trailing aberta para o ativo: emite UMA OrderIntent
+  do tipo TRAILING_STOP (side=SELL, qty = posicao inteira, trail_percent).
+- Com posicao E ja existe trailing aberta: nao faz nada (ja protegido).
+
+A verificacao de "ja existe trailing aberta" usa o broker como fonte de verdade
+(get_open_orders), entao sobrevive a restart sem duplicar protecao.
 """
 
 from __future__ import annotations
@@ -22,59 +26,54 @@ from strategies.base import Strategy, StrategyContext
 logger = logging.getLogger("strategy.trailing_stop")
 
 
-def high_water_key(symbol: str) -> str:
-    return f"trailing_high:{symbol.upper()}"
-
-
 class TrailingStopStrategy(Strategy):
     name = "trailing_stop"
 
     def evaluate(self, ctx: StrategyContext) -> list[OrderIntent]:
         intents: list[OrderIntent] = []
 
+        # Ordens trailing ja abertas no broker, por simbolo (broker = verdade).
+        open_trailing = self._open_trailing_symbols(ctx)
+
         for item in ctx.watchlist.items:
             if item.trailing_stop_pct is None:
-                continue  # ativo sem trailing stop configurado
+                continue
             symbol = item.symbol
-            key = high_water_key(symbol)
 
             position = ctx.broker.get_position(symbol)
             if position is None or position.qty <= 0:
-                # Sem posicao: nao ha o que proteger; limpa o high-water.
-                ctx.state.delete(key)
-                continue
+                continue  # sem posicao: nada a proteger
 
-            price = ctx.broker.get_last_price(symbol)
+            if symbol in open_trailing:
+                continue  # ja existe trailing stop nativo cobrindo o ativo
 
-            # Inicializa o high-water com o maior entre preco de entrada e atual.
-            stored_high = ctx.state.get_decimal(key)
-            baseline = stored_high if stored_high is not None else position.avg_entry_price
-            high_water = max(baseline, price)
-            if high_water != stored_high:
-                ctx.state.set_decimal(key, high_water)
-
-            stop_level = high_water * (Decimal(1) - item.trailing_stop_pct)
-
-            logger.debug(
-                "%s price=%s high_water=%s stop=%s (pct=%s)",
-                symbol, price, high_water, stop_level, item.trailing_stop_pct,
+            trail_percent = item.trailing_stop_pct * Decimal(100)  # fracao -> pontos %
+            logger.info(
+                "Colocando trailing stop nativo %s: qty=%s trail=%s%%",
+                symbol, position.qty, trail_percent,
+            )
+            intents.append(
+                OrderIntent(
+                    symbol=symbol,
+                    side=OrderSide.SELL,
+                    qty=position.qty,
+                    order_type=OrderType.TRAILING_STOP,
+                    trail_percent=trail_percent,
+                    strategy=self.name,
+                )
             )
 
-            if price <= stop_level:
-                logger.info(
-                    "Trailing stop disparado %s: price=%s <= stop=%s (qty=%s)",
-                    symbol, price, stop_level, position.qty,
-                )
-                intents.append(
-                    OrderIntent(
-                        symbol=symbol,
-                        side=OrderSide.SELL,
-                        qty=position.qty,
-                        order_type=OrderType.MARKET,
-                        strategy=self.name,
-                    )
-                )
-                # Reset: posicao sera fechada; proximo ciclo recomeca limpo.
-                ctx.state.delete(key)
-
         return intents
+
+    @staticmethod
+    def _open_trailing_symbols(ctx: StrategyContext) -> set[str]:
+        try:
+            orders = ctx.broker.get_open_orders()
+        except Exception:
+            logger.warning("Falha ao consultar ordens abertas; assumindo nenhuma.")
+            return set()
+        return {
+            o.symbol.upper()
+            for o in orders
+            if "trailing" in (o.order_type or "").lower()
+        }

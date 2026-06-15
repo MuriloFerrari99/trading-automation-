@@ -68,6 +68,14 @@ class WheelConfig(BaseModel):
 
 class WatchlistItem(BaseModel):
     symbol: str
+    # Classe do ativo: "equity" (default, respeita pregao) ou "crypto" (24/7).
+    # Define se as ordens podem ser geradas fora do horario de pregao de acoes.
+    asset_class: str = "equity"
+    # Tick size (passo minimo de preco) e lote minimo (passo de quantidade) do
+    # ativo. None => sem arredondamento (acoes inteiras / comportamento legado).
+    tick_size: Decimal | None = Field(default=None, gt=0)
+    lot_size: Decimal | None = Field(default=None, gt=0)
+    fractional: bool = False  # permite quantidade fracionada (cripto, acoes frac.)
     trailing_stop_pct: Decimal | None = Field(default=None, gt=0, lt=1)
     ladder: LadderConfig | None = None
     wheel: WheelConfig | None = None
@@ -76,6 +84,18 @@ class WatchlistItem(BaseModel):
     @classmethod
     def _norm(cls, v: str) -> str:
         return v.strip().upper()
+
+    @field_validator("asset_class")
+    @classmethod
+    def _norm_asset_class(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("equity", "crypto"):
+            raise ValueError(f"asset_class invalido: {v!r} (use 'equity' ou 'crypto')")
+        return v
+
+    @property
+    def is_crypto(self) -> bool:
+        return self.asset_class == "crypto"
 
 
 class Watchlist(BaseModel):
@@ -87,6 +107,11 @@ class Watchlist(BaseModel):
     def get(self, symbol: str) -> WatchlistItem | None:
         symbol = symbol.upper()
         return next((i for i in self.items if i.symbol == symbol), None)
+
+    def has_crypto(self) -> bool:
+        """True se algum ativo opera 24/7 (cripto) — o Monitor entao nao deve
+        pular ciclos quando o pregao de acoes estiver fechado."""
+        return any(i.is_crypto for i in self.items)
 
 
 def _pct_to_fraction(value) -> Decimal:
@@ -124,9 +149,15 @@ def load_watchlist(path: Path | str = DEFAULT_WATCHLIST_PATH) -> Watchlist:
         trailing = entry.get("trailing_stop_pct")
         ladder_raw = entry.get("ladder")
         wheel_raw = entry.get("wheel")
+        tick = entry.get("tick_size")
+        lot = entry.get("lot_size")
         items.append(
             WatchlistItem(
                 symbol=entry["symbol"],
+                asset_class=entry.get("asset_class", "equity"),
+                tick_size=Decimal(str(tick)) if tick is not None else None,
+                lot_size=Decimal(str(lot)) if lot is not None else None,
+                fractional=bool(entry.get("fractional", False)),
                 trailing_stop_pct=_pct_to_fraction(trailing) if trailing is not None else None,
                 ladder=_parse_ladder(ladder_raw) if ladder_raw else None,
                 wheel=_parse_wheel(wheel_raw) if wheel_raw else None,

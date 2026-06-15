@@ -11,7 +11,8 @@ import logging
 
 from broker.base import BrokerClient
 from config.watchlist import Watchlist
-from core.models import Signal
+from core.models import OptionOrderIntent, Signal
+from core.rounding import round_price, round_qty
 from data.audit_log import PLANNER, AuditLog
 from data.signal_repo import SignalRepository
 from data.state_repo import StateRepository
@@ -65,8 +66,19 @@ class Planner:
         return signals
 
     def plan(self) -> list[TradeIntent]:
+        # Estado do pregao de acoes p/ as estrategias gatearem ativos de acao
+        # fora de hora (cripto, 24/7, ignora). Falha de rede => assume fechado
+        # (fail-safe: nao gera ordem de acao sem confirmar que o pregao esta aberto).
+        try:
+            equity_open = self._broker.is_market_open()
+        except Exception as exc:
+            logger.warning("Falha ao consultar clock de mercado; assumindo fechado: %s", exc)
+            equity_open = False
         ctx = StrategyContext(
-            broker=self._broker, state=self._state, watchlist=self._watchlist
+            broker=self._broker,
+            state=self._state,
+            watchlist=self._watchlist,
+            equity_market_open=equity_open,
         )
         intents: list[TradeIntent] = []
         for strategy in self._strategies:
@@ -92,24 +104,55 @@ class Planner:
         if halt:
             self._audit_risk("risk_halt", None, {"reason": halt})
 
+        # Cache de preco por simbolo DENTRO do ciclo: varios intents do mesmo
+        # ativo nao disparam chamadas REST repetidas (mesma cotacao do tick).
+        price_cache: dict[str, object] = {}
+
         approved: list[TradeIntent] = []
         for intent in intents:
             symbol = intent.symbol if hasattr(intent, "symbol") else intent.underlying
-            price = self._safe_price(symbol)
-            decision = self._risk.assess(intent, account.equity, positions, price)
+            if symbol not in price_cache:
+                price_cache[symbol] = self._safe_price(symbol)
+            price = price_cache[symbol]
+            item = self._watchlist.get(symbol)
+            fractional = bool(item.fractional) if item is not None else False
+            decision = self._risk.assess(
+                intent, account.equity, positions, price, fractional=fractional
+            )
             if decision.approved and decision.intent is not None:
                 if decision.intent is not intent:
                     self._audit_risk("risk_adjusted", symbol, {"reason": decision.reason})
-                approved.append(decision.intent)
+                final = self._round_to_market_steps(decision.intent)
+                if final is None:
+                    self._audit_risk("risk_vetoed", symbol, {"reason": "qty arredondada para 0 (lote)"})
+                    continue
+                approved.append(final)
             else:
                 logger.info("Risco vetou %s: %s", symbol, decision.reason)
                 self._audit_risk("risk_vetoed", symbol, {"reason": decision.reason})
         return approved
 
+    def _round_to_market_steps(self, intent):
+        """Alinha qty/limit ao tick/lote do ativo (cripto/fracionado). Opcoes
+        passam direto (contratos sao inteiros e ja vem do broker)."""
+        if isinstance(intent, OptionOrderIntent):
+            return intent
+        item = self._watchlist.get(intent.symbol)
+        if item is None or (item.lot_size is None and item.tick_size is None and not item.fractional):
+            return intent  # sem metadados de mercado: comportamento legado
+        new_qty = round_qty(intent.qty, item.lot_size, fractional=item.fractional)
+        if new_qty <= 0:
+            return None
+        new_limit = round_price(intent.limit_price, item.tick_size)
+        if new_qty == intent.qty and new_limit == intent.limit_price:
+            return intent
+        return intent.model_copy(update={"qty": new_qty, "limit_price": new_limit})
+
     def _safe_price(self, symbol: str):
         try:
             return self._broker.get_last_price(symbol)
-        except Exception:
+        except Exception as exc:
+            logger.warning("Falha ao obter preco de %s p/ risco: %s", symbol, exc)
             return None
 
     def _audit_risk(self, event: str, symbol: str | None, payload: dict) -> None:

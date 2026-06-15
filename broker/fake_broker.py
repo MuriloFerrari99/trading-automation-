@@ -34,6 +34,8 @@ class FakeBroker(BrokerClient):
         options_level: int = 0,
         market_open: bool = True,
         today: date | None = None,
+        partial_fill_ratio: Decimal | float | None = None,
+        fail_after_record: bool = False,
     ) -> None:
         self._cash = cash
         self._prices: dict[str, Decimal] = dict(prices or {})
@@ -41,6 +43,15 @@ class FakeBroker(BrokerClient):
         self._bars: dict[str, list[Decimal]] = {}
         self._options_level = options_level
         self._market_open = market_open
+        # Injecao de falhas p/ testar os ramos do caminho de ordem:
+        # - partial_fill_ratio: fracao (0..1) preenchida em ordens a mercado
+        #   (status "partially_filled" em vez de "filled").
+        # - fail_after_record: registra a ordem no broker e LEVANTA (simula
+        #   timeout: o broker tem a ordem, mas o cliente nao ve a resposta).
+        self._partial_fill_ratio = (
+            Decimal(str(partial_fill_ratio)) if partial_fill_ratio is not None else None
+        )
+        self._fail_after_record = fail_after_record
         self._next_open = None
         self._next_close = None
         self._today = today or date(2026, 6, 15)
@@ -60,6 +71,12 @@ class FakeBroker(BrokerClient):
 
     def set_options_level(self, level: int) -> None:
         self._options_level = level
+
+    def set_fail_after_record(self, fail: bool) -> None:
+        self._fail_after_record = fail
+
+    def set_partial_fill_ratio(self, ratio: Decimal | float | None) -> None:
+        self._partial_fill_ratio = Decimal(str(ratio)) if ratio is not None else None
 
     def seed_position(self, symbol: str, qty: Decimal, avg_entry_price: Decimal) -> None:
         symbol = symbol.upper()
@@ -115,7 +132,8 @@ class FakeBroker(BrokerClient):
     def set_bars(self, symbol: str, closes) -> None:
         self._bars[symbol.upper()] = [Decimal(str(c)) for c in closes]
 
-    def get_bars(self, symbol: str, limit: int = 60) -> list[Decimal]:
+    def get_bars(self, symbol: str, limit: int = 60, *, timeframe: str = "1Day") -> list[Decimal]:
+        # timeframe ignorado no fake (barras pre-carregadas via set_bars).
         bars = self._bars.get(symbol.upper(), [])
         return list(bars[-limit:])
 
@@ -146,18 +164,46 @@ class FakeBroker(BrokerClient):
             self._open_orders[broker_id] = order
             return self._as_result(order)
 
-        # Demais tipos: preenchem imediatamente.
         fill_price = self._prices.get(intent.symbol, intent.limit_price or Decimal("1"))
-        self._apply_fill(intent, fill_price)
+
+        # Timeout pos-registro: o broker JA conhece a ordem (idempotencia futura
+        # a reencontra), mas o cliente recebe uma excecao em vez da resposta.
+        if self._fail_after_record:
+            pending = BrokerOrder(
+                broker_order_id=broker_id,
+                client_order_id=cid,
+                symbol=intent.symbol,
+                side=intent.side.value,
+                qty=intent.qty,
+                filled_qty=Decimal(0),
+                status="accepted",
+                order_type=intent.order_type.value,
+            )
+            if cid:
+                self._orders_by_cid[cid] = pending
+            self._open_orders[broker_id] = pending
+            raise RuntimeError("timeout simulado apos o broker registrar a ordem")
+
+        # Fill total (default) ou parcial (quando partial_fill_ratio esta setado).
+        if self._partial_fill_ratio is not None and Decimal(0) < self._partial_fill_ratio < Decimal(1):
+            filled_qty = intent.qty * self._partial_fill_ratio
+            status = "partially_filled"
+        else:
+            filled_qty = intent.qty
+            status = "filled"
+
+        if filled_qty > 0:
+            self._apply_fill(intent.model_copy(update={"qty": filled_qty}), fill_price)
         order = BrokerOrder(
             broker_order_id=broker_id,
             client_order_id=cid,
             symbol=intent.symbol,
             side=intent.side.value,
             qty=intent.qty,
-            filled_qty=intent.qty,
-            status="filled",
+            filled_qty=filled_qty,
+            status=status,
             order_type=intent.order_type.value,
+            filled_avg_price=fill_price,
         )
         if cid:
             self._orders_by_cid[cid] = order
@@ -166,9 +212,10 @@ class FakeBroker(BrokerClient):
             symbol=intent.symbol,
             side=intent.side,
             qty=intent.qty,
-            filled_qty=intent.qty,
+            filled_qty=filled_qty,
             filled_avg_price=fill_price,
-            status="filled",
+            status=status,
+            client_order_id=cid,
         )
 
     @staticmethod
@@ -179,8 +226,9 @@ class FakeBroker(BrokerClient):
             side=OrderSide(order.side),
             qty=order.qty,
             filled_qty=order.filled_qty,
-            filled_avg_price=None,
+            filled_avg_price=order.filled_avg_price,
             status=order.status,
+            client_order_id=order.client_order_id,
         )
 
     def seed_open_order(self, order: BrokerOrder) -> None:
@@ -277,8 +325,13 @@ class FakeBroker(BrokerClient):
             return self._as_result(self._orders_by_cid[cid])  # idempotente
 
         self.submitted_options.append(intent)
-        # Premio simulado: 1% do strike por acao (100 acoes por contrato).
-        premium_per_share = intent.contract.strike * Decimal("0.01")
+        # Premio por acao: o limit_price (premio-alvo) quando a ordem e LIMIT;
+        # senao um premio simulado de 1% do strike. (100 acoes por contrato.)
+        premium_per_share = (
+            intent.limit_price
+            if intent.order_type == OrderType.LIMIT and intent.limit_price is not None
+            else intent.contract.strike * Decimal("0.01")
+        )
         premium = premium_per_share * Decimal(100) * intent.qty
         if intent.side == OrderSide.SELL:
             self._cash += premium  # vender premio credita caixa
@@ -302,4 +355,5 @@ class FakeBroker(BrokerClient):
             filled_qty=intent.qty,
             filled_avg_price=premium_per_share,
             status="filled",
+            client_order_id=cid,
         )

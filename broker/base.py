@@ -48,6 +48,7 @@ class BrokerOrder:
     filled_qty: Decimal
     status: str  # status cru do broker (ex: new, filled, partially_filled, canceled)
     order_type: str
+    filled_avg_price: Decimal | None = None  # preco medio do fill (p/ P&L/reconcile)
 
 
 class AccountInfo:
@@ -97,8 +98,11 @@ class BrokerClient(ABC):
         """Retorna o ultimo preco negociado do ativo (quote/trade)."""
 
     @abstractmethod
-    def get_bars(self, symbol: str, limit: int = 60) -> list[Decimal]:
-        """Fechamentos recentes (ordem cronologica) p/ classificacao de regime."""
+    def get_bars(self, symbol: str, limit: int = 60, *, timeframe: str = "1Day") -> list[Decimal]:
+        """Fechamentos recentes (ordem cronologica) p/ classificacao de regime.
+
+        `timeframe` e uma string portavel ("1Min", "5Min", "1Hour", "1Day", ...);
+        cada broker a traduz para o seu proprio enum. Default diario (legado)."""
 
     @abstractmethod
     def submit_order(self, intent: OrderIntent) -> OrderResult:

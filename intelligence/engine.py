@@ -29,8 +29,16 @@ from feedback.evaluation import evaluate
 from feedback.models import Decision, DecisionAction, MarketRegime
 from feedback.regime import classify_regime
 from intelligence.decision_policy import DecisionPolicy, PolicyVerdict
+from synthesis.synthesizer import synthesize
+from synthesis.views import Direction, View, view_from_signal
 
 logger = logging.getLogger("intelligence.engine")
+
+# Visao fraca derivada do regime (entra na sintese como mais uma fonte).
+_REGIME_VIEW = {
+    MarketRegime.TREND_UP: Direction.LONG,
+    MarketRegime.TREND_DOWN: Direction.SHORT,
+}
 
 TradeIntent = OrderIntent | OptionOrderIntent
 PriceProvider = Callable[[str], Decimal]
@@ -73,6 +81,21 @@ class DecisionIntelligence:
 
     # ------------------------------------------------------------------ #
 
+    def _regime_for(
+        self, symbol: str, market_data: dict[str, list] | None
+    ) -> tuple[MarketRegime, Decimal | None]:
+        """Classifica o regime do simbolo.
+
+        Preferencia: barras reais do `market_data` (IngestionAgent) — uma serie
+        completa por ciclo, regime confiavel ja no 1o tick. Sem barras, cai no
+        fallback de amostragem (1 preco/ciclo acumulado no buffer)."""
+        bars = market_data.get(symbol) if market_data else None
+        if bars:
+            closes = [float(b) for b in bars]
+            price = Decimal(str(bars[-1]))
+            return classify_regime(closes, **self._regime_kwargs), price
+        return self._update_and_regime(symbol)
+
     def _update_and_regime(self, symbol: str) -> tuple[MarketRegime, Decimal | None]:
         price: Decimal | None = None
         if self._price_provider is not None:
@@ -102,10 +125,37 @@ class DecisionIntelligence:
         ]
         return max(aligned) if aligned else 0.0
 
+    @staticmethod
+    def _synthesis_context(
+        symbol: str, signals: list[Signal], regime: MarketRegime
+    ) -> dict:
+        """Sintese (Camada 3) das visoes disponiveis -> contexto p/ o log.
+
+        ADITIVO: enriquece o `context` com conviccao/conflito/racional. NAO
+        dimensiona (sizing e responsabilidade do RiskManager no Planner) e NAO
+        veta — quem veta e a DecisionPolicy. So da observabilidade e prepara o
+        terreno para o ML/sizing usarem a sintese depois."""
+        views = [
+            view_from_signal(s) for s in signals if s.symbol.upper() == symbol.upper()
+        ]
+        rdir = _REGIME_VIEW.get(regime)
+        if rdir is not None:
+            views.append(View("regime", rdir, 0.55, 0.5, f"regime {regime.value}"))
+        if not views:
+            return {}
+        syn = synthesize(symbol, views)
+        return {
+            "synthesis_direction": syn.direction.value,
+            "conviction": round(syn.conviction, 4),
+            "conflict": syn.conflict,
+            "rationale": syn.rationale,
+        }
+
     def process(
         self,
         intents: list[TradeIntent],
         signals: list[Signal] | None = None,
+        market_data: dict[str, list] | None = None,
     ) -> ProcessResult:
         signals = signals or []
         if not intents:
@@ -115,11 +165,13 @@ class DecisionIntelligence:
         report = evaluate(self._log.all_records())
 
         # Regime calculado uma vez por simbolo (evita reamostrar o preco).
+        # Usa barras reais do market_data quando disponiveis (regime confiavel
+        # ja no 1o ciclo); senao cai no fallback de amostragem por preco.
         regimes: dict[str, tuple[MarketRegime, Decimal | None]] = {}
         for intent in intents:
             symbol, _, _, _ = _extract(intent)
             if symbol not in regimes:
-                regimes[symbol] = self._update_and_regime(symbol)
+                regimes[symbol] = self._regime_for(symbol, market_data)
 
         allowed: list[TradeIntent] = []
         verdicts: list[PolicyVerdict] = []
@@ -134,6 +186,13 @@ class DecisionIntelligence:
             verdicts.append(verdict)
 
             action = _ACTION[side] if verdict.allow else DecisionAction.SKIP
+            context = {
+                "regime": regime.value,
+                "policy_reason": verdict.reason,
+                "score": round(verdict.score, 4),
+                "signal_strength": round(strength, 4),
+            }
+            context.update(self._synthesis_context(symbol, signals, regime))
             self._log.record(
                 Decision(
                     strategy=strategy,
@@ -142,12 +201,7 @@ class DecisionIntelligence:
                     regime=regime,
                     reference_price=price,
                     signal_strength=strength,
-                    context={
-                        "regime": regime.value,
-                        "policy_reason": verdict.reason,
-                        "score": round(verdict.score, 4),
-                        "signal_strength": round(strength, 4),
-                    },
+                    context=context,
                     client_order_id=coid,
                 )
             )

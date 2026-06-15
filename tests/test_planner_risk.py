@@ -38,11 +38,13 @@ def _planner(broker, state, strategy, guard):
 
 
 def test_planner_caps_buy_qty(broker, state):
-    broker.set_price("AAPL", "100")  # equity = cash 100k => max 20% => 200 shares
+    broker.set_price("AAPL", "100")
+    # equity 100k, risk 1% => $1k, stop assumido 10% => $10/acao => 100 acoes.
+    # O cap de risco-por-trade binda em 100 (antes do teto por simbolo de 200).
     planner = _planner(broker, state, _BuyStrategy(Decimal("500")), PortfolioRiskGuard(Decimal("100000")))
     intents = planner.plan()
     assert len(intents) == 1
-    assert intents[0].qty == Decimal("200")  # capado pelo teto por simbolo
+    assert intents[0].qty == Decimal("100")  # capado pelo risco-por-trade
 
 
 def test_planner_vetoes_buy_when_halted(broker, state):

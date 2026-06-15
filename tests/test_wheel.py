@@ -30,6 +30,27 @@ def _ctx(broker, state, watchlist):
     return StrategyContext(broker=broker, state=state, watchlist=watchlist)
 
 
+def test_option_limit_order_propagates_target_premium():
+    """Ordem de opcoes LIMIT leva o premio-alvo (limit_price) ate o broker."""
+    from datetime import date
+
+    from core.models import OptionContract, OptionOrderIntent, OrderType
+
+    broker = FakeBroker(options_level=1)
+    contract = OptionContract(
+        occ_symbol="KO261218P00050000", underlying="KO",
+        option_type=OptionType.PUT, strike=Decimal("50"), expiration=date(2026, 12, 18),
+    )
+    intent = OptionOrderIntent(
+        contract=contract, side=OrderSide.SELL, qty=Decimal("1"),
+        order_type=OrderType.LIMIT, limit_price=Decimal("1.25"),
+    )
+    result = broker.submit_option_order(intent)
+    # premio por acao = limit_price (1.25), nao o 1% do strike (0.50).
+    assert result.filled_avg_price == Decimal("1.25")
+    assert broker.submitted_options[-1].order_type == OrderType.LIMIT
+
+
 # --- GATE -------------------------------------------------------------------
 def test_gate_blocks_without_options_level(state, wheel_watchlist):
     broker = FakeBroker(cash=Decimal("100000"), prices={"KO": Decimal("60")}, options_level=0)

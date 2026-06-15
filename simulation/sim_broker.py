@@ -21,6 +21,7 @@ from decimal import Decimal
 
 from broker.base import AccountInfo, BrokerOrder
 from core.models import OrderResult, OrderSide, OrderType, Position
+from simulation.costs import CostModel
 
 
 class SimBroker:
@@ -35,7 +36,13 @@ class SimBroker:
         cash: float = 100_000.0,
         commission_bps: float = 5.0,
         slippage_bps: float = 5.0,
+        cost: CostModel | None = None,
     ) -> None:
+        # `cost` (preset CRYPTO_BASE/EQUITY_BASE ou .stressed()) tem precedencia sobre
+        # commission_bps/slippage_bps. Os bps soltos ficam por compat retroativa.
+        if cost is not None:
+            commission_bps = cost.commission_bps
+            slippage_bps = cost.slippage_bps
         self._symbol = symbol.upper()
         self._open = opens
         self._high = highs

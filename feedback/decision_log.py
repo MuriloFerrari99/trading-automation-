@@ -130,6 +130,22 @@ class DecisionLog:
                 ),
             )
 
+    def set_entry_price_by_client_order_id(self, coid: str, entry_price: Decimal) -> int:
+        """Fixa o entry_price REAL (preco de fill da compra) nas decisoes abertas
+        daquele client_order_id. Retorna quantas linhas foram atualizadas.
+
+        Isso torna o P&L do loop de feedback fiel ao fill real (e nao ao
+        reference_price da hora da decisao)."""
+        with self._conn:
+            cur = self._conn.execute(
+                """
+                UPDATE decisions SET entry_price = ?
+                WHERE client_order_id = ? AND outcome_status = ?
+                """,
+                (_dec_to_str(entry_price), coid, OutcomeStatus.OPEN.value),
+            )
+            return cur.rowcount
+
     def attach_outcome_by_client_order_id(self, coid: str, outcome: Outcome) -> int:
         """Anexa resultado a decisao(oes) ligada(s) a um client_order_id.
         Retorna quantas linhas foram atualizadas."""

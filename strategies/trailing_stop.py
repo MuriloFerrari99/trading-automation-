@@ -20,6 +20,7 @@ from __future__ import annotations
 import logging
 from decimal import Decimal
 
+from core.market_clock import asset_tradable_now
 from core.models import OrderIntent, OrderSide, OrderType
 from strategies.base import Strategy, StrategyContext
 
@@ -29,25 +30,44 @@ logger = logging.getLogger("strategy.trailing_stop")
 class TrailingStopStrategy(Strategy):
     name = "trailing_stop"
 
+    def __init__(self, default_trailing_stop_pct: Decimal | None = None) -> None:
+        # Trailing padrao para QUALQUER long sem config propria. None mantem o
+        # comportamento legado (so protege itens com trailing_stop_pct).
+        self._default_pct = default_trailing_stop_pct
+
     def evaluate(self, ctx: StrategyContext) -> list[OrderIntent]:
         intents: list[OrderIntent] = []
 
         # Ordens trailing ja abertas no broker, por simbolo (broker = verdade).
         open_trailing = self._open_trailing_symbols(ctx)
 
-        for item in ctx.watchlist.items:
-            if item.trailing_stop_pct is None:
-                continue
-            symbol = item.symbol
+        # Protege TODO long aberto (broker = verdade), nao so os da watchlist:
+        # posicoes orfas (ex: herdadas de um reconcile) tambem ganham stop.
+        for position in self._open_longs(ctx):
+            symbol = position.symbol
+            item = ctx.watchlist.get(symbol)
 
-            position = ctx.broker.get_position(symbol)
-            if position is None or position.qty <= 0:
-                continue  # sem posicao: nada a proteger
+            asset_class = item.asset_class if item is not None else "equity"
+            if not asset_tradable_now(asset_class, ctx.equity_market_open):
+                continue  # ativo de acao fora do pregao (cripto, 24/7, segue)
+
+            # Ladder gere seu PROPRIO stop de invalidacao (acumula na queda); um
+            # trailing aqui venderia cedo e brigaria com a tese. Pulamos.
+            if item is not None and item.ladder is not None:
+                continue
 
             if symbol in open_trailing:
                 continue  # ja existe trailing stop nativo cobrindo o ativo
 
-            trail_percent = item.trailing_stop_pct * Decimal(100)  # fracao -> pontos %
+            pct = (
+                item.trailing_stop_pct
+                if item is not None and item.trailing_stop_pct is not None
+                else self._default_pct
+            )
+            if pct is None:
+                continue  # sem trailing configurado e sem default: nao protege
+
+            trail_percent = pct * Decimal(100)  # fracao -> pontos %
             logger.info(
                 "Colocando trailing stop nativo %s: qty=%s trail=%s%%",
                 symbol, position.qty, trail_percent,
@@ -64,6 +84,15 @@ class TrailingStopStrategy(Strategy):
             )
 
         return intents
+
+    @staticmethod
+    def _open_longs(ctx: StrategyContext):
+        try:
+            positions = ctx.broker.get_positions()
+        except Exception:
+            logger.warning("Falha ao consultar posicoes; assumindo nenhuma.")
+            return []
+        return [p for p in positions if p.qty > 0]
 
     @staticmethod
     def _open_trailing_symbols(ctx: StrategyContext) -> set[str]:

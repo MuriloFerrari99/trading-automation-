@@ -53,13 +53,16 @@ def test_reconcile_updates_filled_order(db):
         BrokerOrder(
             broker_order_id="b1", client_order_id=intent.client_order_id,
             symbol="AAPL", side="buy", qty=Decimal("10"), filled_qty=Decimal("10"),
-            status="filled", order_type="market",
+            status="filled", order_type="market", filled_avg_price=Decimal("101.5"),
         )
     )
 
     report = reconcile(broker, order_repo, pos_repo, audit)
     assert report.orders_updated == 1
-    assert order_repo.get(intent.client_order_id)["status"] == FILLED
+    row = order_repo.get(intent.client_order_id)
+    assert row["status"] == FILLED
+    # preco medio do fill sincronizado do broker (nao mais None).
+    assert Decimal(row["filled_avg_price"]) == Decimal("101.5")
 
 
 def test_reconcile_marks_unknown_local_order_rejected(db):

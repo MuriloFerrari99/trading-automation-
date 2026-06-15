@@ -47,6 +47,49 @@ def test_does_not_duplicate_when_trailing_already_open(broker, state, watchlist)
     assert intents == []  # ja protegido, nao duplica
 
 
+def test_default_protects_long_without_watchlist_config(broker, state):
+    """Long sem config de trailing recebe o trailing stop PADRAO (universal)."""
+    from config.watchlist import Watchlist, WatchlistItem
+
+    wl = Watchlist(items=[WatchlistItem(symbol="NVDA")])  # sem trailing_stop_pct
+    broker.seed_position("NVDA", qty=Decimal("3"), avg_entry_price=Decimal("100"))
+    broker.set_price("NVDA", "120")
+    strat = TrailingStopStrategy(default_trailing_stop_pct=Decimal("0.08"))
+    intents = strat.evaluate(_ctx(broker, state, wl))
+    assert len(intents) == 1
+    assert intents[0].order_type == OrderType.TRAILING_STOP
+    assert intents[0].trail_percent == Decimal("8")
+
+
+def test_orphan_long_not_in_watchlist_gets_default_stop(broker, state):
+    from config.watchlist import Watchlist, WatchlistItem
+
+    wl = Watchlist(items=[WatchlistItem(symbol="AAPL", trailing_stop_pct=Decimal("0.10"))])
+    broker.seed_position("ORPH", qty=Decimal("2"), avg_entry_price=Decimal("50"))
+    broker.set_price("ORPH", "55")
+    strat = TrailingStopStrategy(default_trailing_stop_pct=Decimal("0.10"))
+    intents = strat.evaluate(_ctx(broker, state, wl))
+    assert [i.symbol for i in intents] == ["ORPH"]
+
+
+def test_ladder_symbol_is_not_trailed(broker, state):
+    """Ativo gerido por ladder nao recebe trailing (ladder tem stop proprio)."""
+    from config.watchlist import LadderConfig, LadderRung, Watchlist, WatchlistItem
+
+    wl = Watchlist(
+        items=[
+            WatchlistItem(
+                symbol="MSFT",
+                ladder=LadderConfig(rungs=[LadderRung(drop_pct=Decimal("0.2"), qty=Decimal("5"))]),
+            )
+        ]
+    )
+    broker.seed_position("MSFT", qty=Decimal("5"), avg_entry_price=Decimal("300"))
+    broker.set_price("MSFT", "320")
+    strat = TrailingStopStrategy(default_trailing_stop_pct=Decimal("0.10"))
+    assert strat.evaluate(_ctx(broker, state, wl)) == []
+
+
 def test_full_protection_flow_places_once(broker, state, watchlist):
     """Em ciclos seguidos, coloca a trailing UMA vez e nao reenvia."""
     from agents.executor import Executor

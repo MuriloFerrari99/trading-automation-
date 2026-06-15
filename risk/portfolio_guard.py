@@ -8,6 +8,7 @@ PARA de abrir risco novo (fail-safe), mas saidas/protecoes continuam permitidas.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from decimal import Decimal
 
 logger = logging.getLogger("risk.portfolio_guard")
@@ -23,6 +24,7 @@ class PortfolioRiskGuard:
         max_per_symbol_pct: Decimal = Decimal("0.20"),
         max_heat_pct: Decimal = Decimal("0.10"),
         peak_equity: Decimal | None = None,
+        on_peak_update: Callable[[Decimal], None] | None = None,
     ) -> None:
         self.start_equity = start_equity
         self.peak_equity = peak_equity or start_equity
@@ -32,11 +34,16 @@ class PortfolioRiskGuard:
         self.max_heat_pct = max_heat_pct
         self.trading_halted = False
         self.halt_reason: str | None = None
+        # Persiste o pico (high-water) p/ o gate de max drawdown sobreviver a
+        # restart intradiario — sem isso o pico reiniciaria no equity atual.
+        self._on_peak_update = on_peak_update
 
     def update(self, equity: Decimal) -> str | None:
         """Atualiza com o equity atual; engaja halt se um limite foi atingido."""
         if equity > self.peak_equity:
             self.peak_equity = equity
+            if self._on_peak_update is not None:
+                self._on_peak_update(equity)
 
         if self.start_equity > 0:
             daily_pl = (equity - self.start_equity) / self.start_equity

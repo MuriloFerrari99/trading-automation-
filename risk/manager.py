@@ -21,7 +21,7 @@ from decimal import Decimal
 from config.risk import RiskSettings
 from core.models import OptionOrderIntent, OptionType, OrderIntent, OrderSide, Position
 from risk.portfolio_guard import PortfolioRiskGuard
-from risk.sizing import max_qty_for_exposure
+from risk.sizing import fixed_fractional_qty, max_qty_for_exposure
 
 logger = logging.getLogger("risk.manager")
 
@@ -62,6 +62,8 @@ class RiskManager:
         equity: Decimal,
         positions: list[Position],
         price: Decimal | None,
+        *,
+        fractional: bool = False,
     ) -> RiskDecision:
         # Saidas/protecoes sempre passam.
         if not self.is_risk_increasing(intent):
@@ -79,19 +81,31 @@ class RiskManager:
 
         if isinstance(intent, OptionOrderIntent):
             return self._assess_option(intent, equity, by_symbol, price)
-        return self._assess_equity_buy(intent, equity, by_symbol, price)
+        return self._assess_equity_buy(intent, equity, by_symbol, price, fractional)
 
-    def _assess_equity_buy(self, intent, equity, by_symbol, price) -> RiskDecision:
+    def _assess_equity_buy(self, intent, equity, by_symbol, price, fractional=False) -> RiskDecision:
         existing = by_symbol.get(intent.symbol)
         current_qty = existing.qty if existing else Decimal(0)
 
         # Cap por exposicao do simbolo.
         max_add = max_qty_for_exposure(
-            equity, self._s.max_per_symbol_pct, price, current_qty
+            equity, self._s.max_per_symbol_pct, price, current_qty, fractional=fractional
         )
         if max_add <= 0:
             return RiskDecision(False, "exposicao por simbolo no limite", None)
         final_qty = min(intent.qty, max_add)
+
+        # Cap por risco-por-trade (fixed fractional ate o stop assumido): nunca
+        # arrisca mais que risk_per_trade_pct do equity num unico trade. So
+        # REDUZ a quantidade — alinha o sizing ao stop protetor que sera emitido.
+        stop_price = price * (Decimal(1) - self._s.assumed_stop_pct)
+        qty_risk = fixed_fractional_qty(
+            equity, self._s.risk_per_trade_pct, price, stop_price, fractional=fractional
+        )
+        if qty_risk > 0:
+            final_qty = min(final_qty, qty_risk)
+        if final_qty <= 0:
+            return RiskDecision(False, "qty <= 0 apos limite de risco-por-trade", None)
 
         # Heat agregado apos a adicao.
         heat = self._heat_after(by_symbol, equity, intent.symbol, final_qty, price)
@@ -102,7 +116,9 @@ class RiskManager:
 
         if final_qty < intent.qty:
             adjusted = intent.model_copy(update={"qty": final_qty})
-            return RiskDecision(True, f"qty reduzida p/ teto por simbolo ({final_qty})", adjusted)
+            return RiskDecision(
+                True, f"qty reduzida p/ limites de risco ({final_qty})", adjusted
+            )
         return RiskDecision(True, "ok", intent)
 
     def _assess_option(self, intent, equity, by_symbol, price) -> RiskDecision:

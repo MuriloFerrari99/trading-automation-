@@ -31,15 +31,21 @@ class BusOrchestrator(AgentOrchestrator):
         decision_agent: DecisionAgent,
         executor_agent: ExecutorAgent,
         feedback_agent: FeedbackAgent,
+        *,
+        reconcile_agent=None,
     ) -> None:
         self._bus = bus
         self._planner_agent = planner_agent
         self._decision_agent = decision_agent
         self._executor_agent = executor_agent
-        # Ordem do pipeline: ingestao -> planner -> decisao -> execucao -> feedback.
+        # Ordem do pipeline: [reconcile periodico] -> ingestao -> planner ->
+        # decisao -> execucao -> feedback. O reconcile vem primeiro (broker =
+        # verdade) e so dispara a cada N ciclos; e opcional (None em testes).
         self._pipeline = [
             ingestion, planner_agent, decision_agent, executor_agent, feedback_agent,
         ]
+        if reconcile_agent is not None:
+            self._pipeline.insert(0, reconcile_agent)
 
     def register(self, agent) -> None:
         """Adiciona um agente ao fim do pipeline (modelo do doc 05)."""
@@ -69,9 +75,23 @@ def assemble_bus_orchestrator(
     decision_log,
     symbols: list[str],
     bars_limit: int = 60,
+    order_repo=None,
+    position_repo=None,
+    audit=None,
+    reconcile_every: int = 6,
 ) -> BusOrchestrator:
-    """Monta o pipeline de agentes sobre um InMemoryBus."""
+    """Monta o pipeline de agentes sobre um InMemoryBus.
+
+    Se order_repo/position_repo/audit forem fornecidos, inclui o ReconcileAgent
+    periodico (broker = verdade a cada `reconcile_every` ciclos)."""
     bus = InMemoryBus()
+    reconcile_agent = None
+    if order_repo is not None and position_repo is not None and audit is not None:
+        from agents.reconcile_agent import ReconcileAgent
+
+        reconcile_agent = ReconcileAgent(
+            broker, order_repo, position_repo, audit, every_n_cycles=reconcile_every
+        )
     return BusOrchestrator(
         bus,
         IngestionAgent(broker, symbols, bars_limit=bars_limit),
@@ -79,4 +99,5 @@ def assemble_bus_orchestrator(
         DecisionAgent(intelligence),
         ExecutorAgent(executor),
         FeedbackAgent(decision_log),
+        reconcile_agent=reconcile_agent,
     )

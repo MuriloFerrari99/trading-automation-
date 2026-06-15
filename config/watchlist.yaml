@@ -24,6 +24,16 @@ symbols:
         - drop_pct: 30.0
           qty: 10
 
+  # Cripto (24/7) — OPT-IN. asset_class=crypto faz o Monitor rodar fora do
+  # pregao de acoes e as estrategias operarem este ativo a qualquer hora.
+  # tick_size/lot_size/fractional alinham qty e preco ao passo do ativo.
+  # - symbol: BTC/USD
+  #   asset_class: crypto
+  #   fractional: true
+  #   tick_size: 0.01
+  #   lot_size: 0.0001
+  #   trailing_stop_pct: 15.0
+
   # Wheel Strategy (opcoes / Nivel 3) — OPT-IN e desabilitada por padrao.
   # So habilite se a conta tiver nivel de opcoes e liquidez (o gate verifica
   # em runtime e recusa caso contrario). Descomente para ativar:

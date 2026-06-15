@@ -63,13 +63,14 @@ class DecisionAgent(BaseAgent):
     def step(self, bus: MessageBus) -> None:
         signals = _drain_concat(bus, SIGNALS)
         intents = _drain_concat(bus, INTENTS)
-        # market_data fica disponivel p/ regime por barras (integracao futura no
-        # engine); drenamos para nao acumular.
-        bus.drain(MARKET_DATA)
+        # market_data alimenta o regime por barras reais. Pegamos o snapshot mais
+        # recente do ciclo (o IngestionAgent publica um dict por step).
+        md_msgs = bus.drain(MARKET_DATA)
+        market_data = md_msgs[-1].payload if md_msgs else None
         if not intents:
             self.last_approved = []
             return
-        result = self._intel.process(intents, signals)
+        result = self._intel.process(intents, signals, market_data=market_data)
         self.last_approved = result.allowed
         bus.publish(APPROVED, result.allowed)
 
@@ -94,6 +95,7 @@ class ExecutorAgent(BaseAgent):
                         "side": r.side.value,
                         "filled_qty": r.filled_qty,
                         "fill_price": r.filled_avg_price,
+                        "client_order_id": r.client_order_id,
                     },
                 )
 

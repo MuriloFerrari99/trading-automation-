@@ -55,6 +55,11 @@ class WheelStrategy(Strategy):
         if not items:
             return intents
 
+        # Opcoes negociam no pregao de acoes; fora dele, nao gera ordem.
+        if not ctx.equity_market_open:
+            logger.info("Wheel: pregao fechado — nenhuma ordem de opcoes neste ciclo.")
+            return intents
+
         account = ctx.broker.get_account()
 
         # GATE 1: nivel de opcoes da conta.

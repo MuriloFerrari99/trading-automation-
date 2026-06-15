@@ -12,6 +12,14 @@ from datetime import datetime
 from broker.base import BrokerClient, MarketClockInfo
 
 
+def asset_tradable_now(asset_class: str, equity_market_open: bool) -> bool:
+    """Um ativo pode operar agora?
+
+    Cripto opera 24/7 (sempre True); acoes respeitam o pregao (clock da corretora).
+    """
+    return True if asset_class == "crypto" else equity_market_open
+
+
 class MarketClock:
     def __init__(self, broker: BrokerClient) -> None:
         self._broker = broker

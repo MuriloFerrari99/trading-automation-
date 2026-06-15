@@ -46,6 +46,26 @@ def test_max_drawdown_halts():
     assert reason is not None and g.trading_halted
 
 
+def test_peak_update_callback_persists_high_water():
+    """O pico persistido (callback) deixa o max drawdown sobreviver a restart."""
+    saved = {}
+    g = PortfolioRiskGuard(
+        start_equity=Decimal("100000"),
+        max_dd_pct=Decimal("0.20"),
+        on_peak_update=lambda p: saved.__setitem__("peak", p),
+    )
+    g.update(Decimal("120000"))  # novo pico => persiste 120k
+    assert saved["peak"] == Decimal("120000")
+
+    # "Restart": novo guard restaura o pico de 120k (em vez de reancorar em 100k).
+    g2 = PortfolioRiskGuard(
+        start_equity=Decimal("100000"), max_dd_pct=Decimal("0.20"),
+        peak_equity=saved["peak"],
+    )
+    reason = g2.update(Decimal("95000"))  # -20.8% do pico 120k => halt
+    assert reason is not None and g2.trading_halted
+
+
 def test_can_open_blocks_when_halted():
     g = _guard()
     g._halt("teste")
@@ -88,13 +108,35 @@ def test_buy_failsafe_without_price():
     assert not d.approved
 
 
-def test_buy_qty_capped_by_per_symbol_limit():
+def test_buy_qty_capped_by_risk_per_trade():
     rm = _rm()
-    # equity 100k, max 20% => $20k; preco 100 => max 200 shares. Pedindo 500.
+    # equity 100k, risk 1% => $1k; stop assumido 10% do preco => $10/acao de
+    # risco => 100 acoes. Pedindo 500, o cap de risco-por-trade binda em 100
+    # (antes mesmo do teto por simbolo de 200).
     buy = OrderIntent(symbol="AAPL", side=OrderSide.BUY, qty=Decimal("500"), strategy="t")
     d = rm.assess(buy, Decimal("100000"), [], Decimal("100"))
     assert d.approved
-    assert d.intent.qty == Decimal("200")  # reduzida ao teto
+    assert d.intent.qty == Decimal("100")
+
+
+def test_buy_qty_capped_by_per_symbol_when_stop_is_tight():
+    # Com stop assumido apertado (5%), o risco-por-trade permite 200 acoes, entao
+    # quem binda passa a ser o teto por simbolo (tambem 200).
+    rm = RiskManager(
+        RiskSettings(
+            _env_file=None,
+            RISK_PER_TRADE_PCT=Decimal("0.01"),
+            MAX_PER_SYMBOL_PCT=Decimal("0.20"),
+            MAX_PORTFOLIO_HEAT_PCT=Decimal("0.10"),
+            DAILY_LOSS_LIMIT_PCT=Decimal("0.03"),
+            MAX_DRAWDOWN_PCT=Decimal("0.20"),
+            ASSUMED_STOP_PCT=Decimal("0.05"),
+        ),
+        _guard(),
+    )
+    buy = OrderIntent(symbol="AAPL", side=OrderSide.BUY, qty=Decimal("500"), strategy="t")
+    d = rm.assess(buy, Decimal("100000"), [], Decimal("100"))
+    assert d.approved and d.intent.qty == Decimal("200")
 
 
 def test_buy_approved_within_limits():

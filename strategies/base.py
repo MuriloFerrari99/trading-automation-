@@ -27,6 +27,10 @@ class StrategyContext:
     broker: BrokerClient
     state: StateRepository
     watchlist: Watchlist
+    # Pregao de acoes aberto agora? Estrategias usam para nao gerar ordens de
+    # ATIVOS DE ACAO fora do pregao; cripto (24/7) ignora isso. Default True
+    # mantem o comportamento dos testes e do caminho de acoes.
+    equity_market_open: bool = True
 
 
 class Strategy(ABC):

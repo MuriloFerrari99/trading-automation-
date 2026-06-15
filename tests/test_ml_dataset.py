@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 
-from ml.dataset import REGIMES, build_training_set
+from ml.dataset import build_training_set
 
 
 def _rec(status, regime="trend_up", score=0.7, strength=0.6, pnl="100"):

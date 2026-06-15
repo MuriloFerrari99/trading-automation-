@@ -20,6 +20,7 @@ import logging
 from decimal import Decimal
 
 from config.watchlist import LadderConfig
+from core.market_clock import asset_tradable_now
 from core.models import OrderIntent, OrderSide, OrderType
 from data.state_repo import StateRepository
 from strategies.base import Strategy, StrategyContext
@@ -44,6 +45,8 @@ class LadderBuysStrategy(Strategy):
         for item in ctx.watchlist.items:
             if item.ladder is None:
                 continue
+            if not asset_tradable_now(item.asset_class, ctx.equity_market_open):
+                continue  # ativo de acao fora do pregao (cripto ignora)
             symbol = item.symbol
             price = ctx.broker.get_last_price(symbol)
             anchor = self._resolve_anchor(symbol, item.ladder, price, ctx.state)

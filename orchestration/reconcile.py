@@ -74,22 +74,23 @@ def reconcile(
             report.add_issue("UNKNOWN_LOCAL_ORDER", cid)
             continue
         status = (broker_order.status or "").lower()
+        fap = broker_order.filled_avg_price
         if status in _BROKER_FILLED:
             order_repo.mark_fill(
                 cid, filled_qty=broker_order.filled_qty,
-                filled_avg_price=None, status=FILLED,
+                filled_avg_price=fap, status=FILLED,
             )
             report.orders_updated += 1
         elif status in _BROKER_PARTIAL:
             order_repo.mark_fill(
                 cid, filled_qty=broker_order.filled_qty,
-                filled_avg_price=None, status=PARTIALLY_FILLED,
+                filled_avg_price=fap, status=PARTIALLY_FILLED,
             )
             report.orders_updated += 1
         elif status in _BROKER_DEAD:
             order_repo.mark_fill(
                 cid, filled_qty=broker_order.filled_qty,
-                filled_avg_price=None, status=CANCELED,
+                filled_avg_price=fap, status=CANCELED,
             )
             report.orders_updated += 1
 

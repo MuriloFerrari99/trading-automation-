@@ -25,22 +25,29 @@ class Monitor:
         clock: MarketClock,
         *,
         interval_minutes: int = 10,
+        run_when_closed: bool = False,
     ) -> None:
         self._orchestrator = orchestrator
         self._clock = clock
         self._interval_minutes = interval_minutes
+        # 24/7: quando ha ativos de cripto na watchlist, o ciclo roda mesmo com o
+        # pregao de acoes fechado (as estrategias gateiam os ativos de acao).
+        self._run_when_closed = run_when_closed
 
     def tick(self) -> CycleResult | None:
-        """Executa um ciclo se o mercado estiver aberto; senao pula."""
+        """Executa um ciclo se o mercado estiver aberto (ou 24/7 p/ cripto)."""
         clock = self._clock.info()
-        if not clock.is_open:
+        if not clock.is_open and not self._run_when_closed:
             nxt = clock.next_open
             logger.info(
                 "Mercado fechado — ciclo pulado.%s",
                 f" Proxima abertura: {nxt}." if nxt else "",
             )
             return None
-        logger.info("Mercado aberto — iniciando ciclo de orquestracao.")
+        if clock.is_open:
+            logger.info("Mercado aberto — iniciando ciclo de orquestracao.")
+        else:
+            logger.info("Pregao fechado, mas ha cripto (24/7) — rodando ciclo.")
         result = self._orchestrator.run_cycle()
         logger.info(
             "Ciclo concluido: %d sinal(is) sugerido(s), %d intencao(oes), "

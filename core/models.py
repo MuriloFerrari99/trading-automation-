@@ -156,6 +156,10 @@ class OptionOrderIntent(BaseModel):
     contract: OptionContract
     side: OrderSide = OrderSide.SELL
     qty: Decimal = Field(..., gt=0)  # numero de contratos (1 contrato = 100 acoes)
+    # MARKET (default) ou LIMIT. Em opcoes ilíquidas, prefira LIMIT p/ controlar
+    # o premio e evitar slippage; o limit_price e o premio-alvo POR ACAO.
+    order_type: OrderType = OrderType.MARKET
+    limit_price: Decimal | None = Field(default=None, gt=0)
     strategy: str = "wheel"
     created_at: datetime = Field(default_factory=_utcnow)
     client_order_id: str | None = None
@@ -163,6 +167,12 @@ class OptionOrderIntent(BaseModel):
     @property
     def underlying(self) -> str:
         return self.contract.underlying
+
+    @model_validator(mode="after")
+    def _limit_requires_price(self) -> "OptionOrderIntent":
+        if self.order_type == OrderType.LIMIT and self.limit_price is None:
+            raise ValueError("limit_price obrigatorio para order_type=LIMIT em opcoes")
+        return self
 
     @model_validator(mode="after")
     def _ensure_client_order_id(self) -> "OptionOrderIntent":
@@ -186,4 +196,7 @@ class OrderResult(BaseModel):
     filled_qty: Decimal = Decimal(0)
     filled_avg_price: Decimal | None = None
     status: str = "accepted"
+    # Liga o resultado a decisao que o originou (loop de feedback usa para casar
+    # o fill REAL com a decisao registrada). Pode ser None em ordens externas.
+    client_order_id: str | None = None
     submitted_at: datetime = Field(default_factory=_utcnow)

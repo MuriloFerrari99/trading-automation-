@@ -44,9 +44,11 @@ class Settings(BaseSettings):
     # True, o guard em `enforce_paper_only()` aborta a execucao.
     live_trading: bool = Field(False, alias="LIVE_TRADING")
 
-    # Implementacao de orquestracao: "local" (padrao) ou "opensquad".
-    # "opensquad" exige um OrchestratorBridge concreto (aguardando doc/SDK).
-    orchestrator: str = Field("local", alias="ORCHESTRATOR")
+    # Implementacao de orquestracao: "bus" (padrao), "local" ou "opensquad".
+    # "bus" e o unico modo que FECHA o loop de feedback (FeedbackAgent) e
+    # classifica regime por barras reais (IngestionAgent), com reconciliacao
+    # periodica. "opensquad" exige um OrchestratorBridge concreto (aguardando SDK).
+    orchestrator: str = Field("bus", alias="ORCHESTRATOR")
 
     @field_validator("alpaca_api_key", "alpaca_secret_key")
     @classmethod

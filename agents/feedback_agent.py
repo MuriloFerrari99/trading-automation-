@@ -30,8 +30,18 @@ class FeedbackAgent(BaseAgent):
 
     def handle(self, msg: Message, bus: MessageBus) -> None:
         fill = msg.payload
-        # So saidas (venda de long) fecham trades neste matching v1.
-        if str(fill.get("side", "")).lower() != "sell":
+        side = str(fill.get("side", "")).lower()
+        # Compra: fixa o entry_price REAL (fill) na decisao aberta, para o P&L
+        # ser medido do preco efetivo de entrada (e nao do reference_price).
+        if side == "buy":
+            coid = fill.get("client_order_id")
+            if coid is not None:
+                self._log.set_entry_price_by_client_order_id(
+                    coid, Decimal(str(fill["fill_price"]))
+                )
+            return
+        # Venda (saida de long) fecha trades neste matching v1.
+        if side != "sell":
             return
         self._close_open_longs(
             symbol=str(fill["symbol"]).upper(),
@@ -43,7 +53,9 @@ class FeedbackAgent(BaseAgent):
         for dec in self._log.open_decisions():
             if dec["symbol"].upper() != symbol or dec["action"] != "buy":
                 continue
-            ref = dec.get("reference_price")
+            # Entrada = fill REAL da compra (entry_price) quando conhecido; senao
+            # cai no reference_price (preco da hora da decisao) como fallback.
+            ref = dec.get("entry_price") or dec.get("reference_price")
             if ref is None:
                 continue  # sem entrada registrada => nao da p/ avaliar
             entry = Decimal(str(ref))

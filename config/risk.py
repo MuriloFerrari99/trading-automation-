@@ -32,6 +32,11 @@ class RiskSettings(BaseSettings):
     # Distancia ate o stop assumida no calculo de "portfolio heat" (risco-ate-o
     # -stop) quando nao ha stop especifico por posicao. Default 10% (= trailing).
     assumed_stop_pct: Decimal = Field(Decimal("0.10"), alias="ASSUMED_STOP_PCT")
+    # Trailing stop protetor padrao aplicado a QUALQUER long sem protecao e sem
+    # config propria de trailing na watchlist (defesa universal de saida).
+    default_trailing_stop_pct: Decimal = Field(
+        Decimal("0.10"), alias="DEFAULT_TRAILING_STOP_PCT"
+    )
 
 
 def get_risk_settings() -> RiskSettings:

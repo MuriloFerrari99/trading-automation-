@@ -89,17 +89,31 @@ class AlpacaBroker(BrokerClient):
         latest = self._data.get_stock_latest_trade(req)
         return _to_decimal(latest[symbol.upper()].price)
 
-    def get_bars(self, symbol: str, limit: int = 60) -> list[Decimal]:
+    def get_bars(self, symbol: str, limit: int = 60, *, timeframe: str = "1Day") -> list[Decimal]:
         from alpaca.data.requests import StockBarsRequest
-        from alpaca.data.timeframe import TimeFrame
 
         symbol = symbol.upper()
         req = StockBarsRequest(
-            symbol_or_symbols=symbol, timeframe=TimeFrame.Day, limit=limit
+            symbol_or_symbols=symbol, timeframe=self._timeframe(timeframe), limit=limit
         )
         bars = self._data.get_stock_bars(req)
         data = getattr(bars, "data", {}).get(symbol, []) if bars else []
         return [_to_decimal(b.close) for b in data]
+
+    @staticmethod
+    def _timeframe(tf: str):
+        """Traduz uma string portavel ("1Min"/"5Min"/"1Hour"/"1Day") para o
+        TimeFrame do alpaca-py. Default diario se desconhecido."""
+        from alpaca.data.timeframe import TimeFrame, TimeFrameUnit
+
+        table = {
+            "1min": TimeFrame.Minute,
+            "5min": TimeFrame(5, TimeFrameUnit.Minute),
+            "15min": TimeFrame(15, TimeFrameUnit.Minute),
+            "1hour": TimeFrame.Hour,
+            "1day": TimeFrame.Day,
+        }
+        return table.get(tf.lower(), TimeFrame.Day)
 
     def submit_order(self, intent: OrderIntent) -> OrderResult:
         order_request = self._build_order_request(intent)
@@ -116,6 +130,7 @@ class AlpacaBroker(BrokerClient):
                 else None
             ),
             status=str(getattr(order, "status", "accepted")),
+            client_order_id=intent.client_order_id,
         )
 
     def _build_order_request(self, intent: OrderIntent):
@@ -184,6 +199,7 @@ class AlpacaBroker(BrokerClient):
 
     @staticmethod
     def _to_broker_order(o) -> BrokerOrder:
+        fap = getattr(o, "filled_avg_price", None)
         return BrokerOrder(
             broker_order_id=str(o.id),
             client_order_id=getattr(o, "client_order_id", None),
@@ -193,6 +209,7 @@ class AlpacaBroker(BrokerClient):
             filled_qty=_to_decimal(getattr(o, "filled_qty", 0)),
             status=str(getattr(o.status, "value", o.status)),
             order_type=str(getattr(o, "order_type", getattr(o, "type", "unknown"))),
+            filled_avg_price=_to_decimal(fap) if fap is not None else None,
         )
 
     def is_market_open(self) -> bool:
@@ -248,16 +265,21 @@ class AlpacaBroker(BrokerClient):
     def submit_option_order(self, intent: OptionOrderIntent) -> OrderResult:
         from alpaca.trading.enums import OrderSide as ASide
         from alpaca.trading.enums import TimeInForce as ATIF
-        from alpaca.trading.requests import MarketOrderRequest
+        from alpaca.trading.requests import LimitOrderRequest, MarketOrderRequest
 
         side = ASide.BUY if intent.side == OrderSide.BUY else ASide.SELL
-        req = MarketOrderRequest(
+        common = dict(
             symbol=intent.contract.occ_symbol,
             qty=float(intent.qty),
             side=side,
             time_in_force=ATIF.DAY,
             client_order_id=intent.client_order_id,
         )
+        # LIMIT quando houver limit_price (premio-alvo); senao MARKET.
+        if intent.order_type == OrderType.LIMIT and intent.limit_price is not None:
+            req = LimitOrderRequest(limit_price=float(intent.limit_price), **common)
+        else:
+            req = MarketOrderRequest(**common)
         order = self._trading.submit_order(req)
         return OrderResult(
             broker_order_id=str(order.id),
@@ -271,4 +293,5 @@ class AlpacaBroker(BrokerClient):
                 else None
             ),
             status=str(getattr(order, "status", "accepted")),
+            client_order_id=intent.client_order_id,
         )

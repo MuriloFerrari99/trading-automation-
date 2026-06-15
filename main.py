@@ -80,14 +80,27 @@ def _build_risk_manager(broker, state, audit) -> RiskManager:
         start_equity = equity
     else:
         start_equity = stored
+
+    # Pico (high-water) persistido GLOBALMENTE (nao por dia): o gate de max
+    # drawdown e pico-a-vale e deve sobreviver a restart intradiario.
+    peak_key = "risk_peak_equity"
+    stored_peak = state.get_decimal(peak_key)
+    peak_equity = max(stored_peak or Decimal("0"), start_equity, equity)
+    state.set_decimal(peak_key, peak_equity)
+
     guard = PortfolioRiskGuard(
         start_equity=start_equity if start_equity > 0 else Decimal("1"),
         daily_loss_pct=rs.daily_loss_limit_pct,
         max_dd_pct=rs.max_drawdown_pct,
         max_per_symbol_pct=rs.max_per_symbol_pct,
         max_heat_pct=rs.max_portfolio_heat_pct,
+        peak_equity=peak_equity if peak_equity > 0 else None,
+        on_peak_update=lambda p: state.set_decimal(peak_key, p),
     )
-    audit.write("system", "risk_init", payload={"start_equity": str(start_equity)})
+    audit.write(
+        "system", "risk_init",
+        payload={"start_equity": str(start_equity), "peak_equity": str(peak_equity)},
+    )
     return RiskManager(rs, guard)
 
 
@@ -125,7 +138,12 @@ def build_app(
 
     # WheelStrategy so age em ativos com `wheel` na watchlist E se o gate de
     # elegibilidade (nivel de opcoes + liquidez) passar em runtime.
-    strategies = [TrailingStopStrategy(), LadderBuysStrategy(), WheelStrategy()]
+    # TrailingStop protege TODO long sem protecao (default da config de risco).
+    strategies = [
+        TrailingStopStrategy(get_risk_settings().default_trailing_stop_pct),
+        LadderBuysStrategy(),
+        WheelStrategy(),
+    ]
     planner = Planner(
         broker,
         state,
@@ -148,14 +166,29 @@ def build_app(
         decision_log, DecisionPolicy(), price_provider=broker.get_last_price
     )
 
-    # Orquestrador selecionado por config (factory). Trocar p/ OpenSquad depois
-    # e so mudar ORCHESTRATOR no .env (e fornecer um OrchestratorBridge).
+    # Orquestrador selecionado por config (factory). Default "bus": pipeline de
+    # agentes que FECHA o loop de feedback, classifica regime por barras reais e
+    # reconcilia periodicamente. As deps abaixo so sao usadas pelo modo "bus".
     orchestrator = build_orchestrator(
-        orchestrator_name, planner, executor, intelligence=intelligence
+        orchestrator_name,
+        planner,
+        executor,
+        intelligence=intelligence,
+        broker=broker,
+        decision_log=decision_log,
+        symbols=watchlist.symbols(),
+        order_repo=order_repo,
+        position_repo=position_repo,
+        audit=audit,
     )
 
     clock = MarketClock(broker)
-    monitor = Monitor(orchestrator, clock, interval_minutes=MONITOR_INTERVAL_MINUTES)
+    monitor = Monitor(
+        orchestrator,
+        clock,
+        interval_minutes=MONITOR_INTERVAL_MINUTES,
+        run_when_closed=watchlist.has_crypto(),  # cripto opera 24/7
+    )
     return monitor, orchestrator
 
 

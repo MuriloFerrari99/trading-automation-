@@ -9,6 +9,10 @@ import pytest
 from agents.executor import Executor
 from agents.planner import Planner
 from config.watchlist import Watchlist, WatchlistItem
+from data.db import Database
+from feedback.decision_log import DecisionLog
+from intelligence.engine import DecisionIntelligence
+from orchestration.bus_orchestrator import BusOrchestrator
 from orchestration.factory import build_orchestrator
 from orchestration.local_orchestrator import LocalOrchestrator
 from orchestration.opensquad_orchestrator import (
@@ -26,11 +30,26 @@ def planner_executor(broker, state, trade_logger, kill_switch):
     return planner, executor
 
 
+@pytest.fixture
+def bus_deps(broker):
+    """Dependencias extras que o orquestrador 'bus' (default) exige."""
+    log = DecisionLog(connection=Database(":memory:").conn)
+    intel = DecisionIntelligence(log, price_provider=broker.get_last_price)
+    return dict(broker=broker, intelligence=intel, decision_log=log, symbols=["AAPL"])
+
+
 # --- Factory ----------------------------------------------------------------
-def test_factory_default_is_local(planner_executor):
+def test_factory_default_is_bus(planner_executor, bus_deps):
     planner, executor = planner_executor
-    orch = build_orchestrator(None, planner, executor)
-    assert isinstance(orch, LocalOrchestrator)
+    orch = build_orchestrator(None, planner, executor, **bus_deps)
+    assert isinstance(orch, BusOrchestrator)
+
+
+def test_factory_bus_without_deps_raises(planner_executor):
+    planner, executor = planner_executor
+    with pytest.raises(ValueError) as exc:
+        build_orchestrator("bus", planner, executor)
+    assert "bus" in str(exc.value).lower()
 
 
 def test_factory_local_explicit(planner_executor):

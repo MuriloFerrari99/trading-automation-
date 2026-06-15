@@ -57,6 +57,7 @@ class Executor:
         audit: AuditLog | None = None,
         max_retries: int = 3,
         backoff_seconds: float = 1.0,
+        max_orders_per_cycle: int = 25,
     ) -> None:
         self._broker = broker
         self._logger = trade_logger
@@ -65,6 +66,9 @@ class Executor:
         self._audit = audit
         self._max_retries = max_retries
         self._backoff = backoff_seconds
+        # Anti-rajada: teto de ordens enviadas num unico ciclo. Protege contra um
+        # bug/loop que gere um enxame de intencoes — corta antes de inundar o broker.
+        self._max_orders_per_cycle = max_orders_per_cycle
 
     def execute(self, intent: OrderIntent | OptionOrderIntent) -> OrderResult | None:
         """Executa uma intencao. Retorna None se barrada por kill switch/validacao."""
@@ -121,6 +125,18 @@ class Executor:
         if self._orders is not None:
             self._orders.record_pending(intent)
         self._write_audit("order_pending", intent, {"client_order_id": cid})
+
+        # Re-checagem do kill switch IMEDIATAMENTE antes da rede: se foi engajado
+        # durante a preparacao (idempotencia/persistencia), nao envia. A ordem
+        # fica PENDING_SUBMIT e a reconciliacao resolve (broker nao a conhece).
+        try:
+            self._kill_switch.ensure_clear()
+        except Exception as exc:
+            logger.warning("Ordem barrada pelo kill switch antes da rede: %s", exc)
+            if self._orders is not None:
+                self._orders.mark_rejected(cid)
+            self._write_audit("order_blocked_killswitch", intent, {"reason": str(exc)})
+            return None
 
         # 5) Submissao com retry/backoff.
         result = self._submit_with_retry(submit_fn, symbol, intent.side)
@@ -180,6 +196,17 @@ class Executor:
             self._logger.log_execution(intent, result)
 
     def execute_many(self, intents: list[OrderIntent | OptionOrderIntent]) -> list[OrderResult]:
+        if len(intents) > self._max_orders_per_cycle:
+            logger.error(
+                "Anti-rajada: %d intencoes excedem o teto de %d por ciclo; "
+                "executando apenas as %d primeiras e descartando o resto.",
+                len(intents), self._max_orders_per_cycle, self._max_orders_per_cycle,
+            )
+            self._write_audit(
+                "cycle_order_cap_hit", intents[0],
+                {"requested": len(intents), "cap": self._max_orders_per_cycle},
+            )
+            intents = intents[: self._max_orders_per_cycle]
         results = []
         for intent in intents:
             res = self.execute(intent)
@@ -204,16 +231,20 @@ class Executor:
     def _safe_last_price(self, symbol: str):
         try:
             return self._broker.get_last_price(symbol)
-        except Exception:
-            return None  # sem preco => pula a checagem de custo
+        except Exception as exc:
+            # sem preco => pula a checagem de custo, mas NAO em silencio.
+            logger.warning("Falha ao obter preco de %s p/ validacao: %s", symbol, exc)
+            return None
 
     def _safe_get_existing(self, cid: str | None):
         if cid is None:
             return None
         try:
             return self._broker.get_order_by_client_id(cid)
-        except Exception:
-            return None  # falha na consulta => segue o fluxo normal
+        except Exception as exc:
+            # falha na consulta de idempotencia => segue o fluxo, mas loga.
+            logger.warning("Falha na consulta de idempotencia (%s): %s", cid, exc)
+            return None
 
     def _submit_with_retry(self, submit, symbol: str, side) -> OrderResult | None:
         """Executa `submit()` com retry/backoff em erros transitorios da API."""

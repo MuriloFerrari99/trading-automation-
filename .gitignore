@@ -34,3 +34,6 @@ data/cache/
 data/sim_report.txt
 data/experiment_report.txt
 data/experiment_oos_report.txt
+data/edge_verdict.txt
+data/momentum_verdict.txt
+data/momentum_diagnose.txt

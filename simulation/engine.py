@@ -12,7 +12,7 @@ Notas por estrategia:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 
 import numpy as np
@@ -55,6 +55,7 @@ class BacktestResult:
     strategy: str
     regime: str
     metrics: PerfMetrics
+    equity: list[float] = field(default_factory=list)  # curva bar-a-bar (p/ o tribunal)
 
 
 def _make_sim_risk(cash: float):
@@ -158,4 +159,7 @@ def run_backtest(
         n_bars=n - warmup,
         bars_in_market=sim.bars_in_market,
     )
-    return BacktestResult(symbol=symbol, strategy=strategy_name, regime=regime, metrics=metrics)
+    return BacktestResult(
+        symbol=symbol, strategy=strategy_name, regime=regime, metrics=metrics,
+        equity=list(sim.equity_curve),
+    )

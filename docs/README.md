@@ -18,6 +18,7 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 | 08 | [research/08-fimathe-engine.md](research/08-fimathe-engine.md) | **`FimatheEngine` (implementada, `fimathe/`):** canais/ZN/PCM/Fibonacci/RSI/ATR/ADX, sinais e stops sobre OHLC; feature table p/ ML (`get_features_for_ml`) |
 | 09 | [research/09-loop-de-feedback.md](research/09-loop-de-feedback.md) | **Camada 0 (implementada):** loop de feedback — registro decisão+contexto+resultado, classificador de regime e avaliação por estratégia/regime (pacote `feedback/`) |
 | 10 | [research/10-camada-decisao.md](research/10-camada-decisao.md) | **Camada de decisão (implementada):** gate por regime que veta combos estratégia×regime com edge negativo + score por sinais (pacote `intelligence/`), fiado no `LocalOrchestrator`/`main` |
+| 11 | [research/11-camada-ml.md](research/11-camada-ml.md) | **Camada 2 — ML (implementada, `ml/`):** classificador P(win) de setup (logística numpy) em champion/challenger; promove só com skill comprovado (IC99 AUC) + expectancy; cold-start seguro |
 
 **Fontes brutas:** [research/fontes/](research/fontes/) — transcrições de áudio que embasam docs (ex.: `fimathe-ouro-transcricao.txt`).
 

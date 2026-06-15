@@ -10,7 +10,9 @@ from datetime import date, datetime, timezone
 from decimal import Decimal
 from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+from core.idempotency import make_client_order_id
 
 
 class OrderSide(str, Enum):
@@ -28,6 +30,7 @@ class OrderType(str, Enum):
     LIMIT = "limit"
     STOP = "stop"
     STOP_LIMIT = "stop_limit"
+    TRAILING_STOP = "trailing_stop"
 
 
 class TimeInForce(str, Enum):
@@ -54,9 +57,15 @@ class OrderIntent(BaseModel):
     limit_price: Decimal | None = Field(default=None, gt=0)
     stop_price: Decimal | None = Field(default=None, gt=0)
     time_in_force: TimeInForce = TimeInForce.DAY
+    # Trailing stop nativo (Alpaca): percentual de trail. Quando definido com
+    # order_type=TRAILING_STOP, o broker rastreia o high-water e move o stop.
+    trail_percent: Decimal | None = Field(default=None, gt=0)
     # Estrategia que originou a intencao (auditoria/rastreabilidade).
     strategy: str = "unknown"
     created_at: datetime = Field(default_factory=_utcnow)
+    # client_order_id determinístico (idempotencia). Calculado do evento de
+    # decisao se nao informado. Ver core/idempotency.py.
+    client_order_id: str | None = None
 
     @field_validator("symbol")
     @classmethod
@@ -65,6 +74,14 @@ class OrderIntent(BaseModel):
         if not v:
             raise ValueError("symbol nao pode ser vazio")
         return v
+
+    @model_validator(mode="after")
+    def _ensure_client_order_id(self) -> "OrderIntent":
+        if self.client_order_id is None:
+            self.client_order_id = make_client_order_id(
+                self.strategy, self.symbol, self.side.value, self.created_at.isoformat()
+            )
+        return self
 
     @field_validator("limit_price")
     @classmethod
@@ -141,10 +158,22 @@ class OptionOrderIntent(BaseModel):
     qty: Decimal = Field(..., gt=0)  # numero de contratos (1 contrato = 100 acoes)
     strategy: str = "wheel"
     created_at: datetime = Field(default_factory=_utcnow)
+    client_order_id: str | None = None
 
     @property
     def underlying(self) -> str:
         return self.contract.underlying
+
+    @model_validator(mode="after")
+    def _ensure_client_order_id(self) -> "OptionOrderIntent":
+        if self.client_order_id is None:
+            self.client_order_id = make_client_order_id(
+                self.strategy,
+                self.contract.occ_symbol,
+                self.side.value,
+                self.created_at.isoformat(),
+            )
+        return self
 
 
 class OrderResult(BaseModel):

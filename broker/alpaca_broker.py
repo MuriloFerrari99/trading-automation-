@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from broker.base import AccountInfo, BrokerClient
+from broker.base import AccountInfo, BrokerClient, BrokerOrder
 from config.settings import Settings
 from core.models import (
     OptionContract,
@@ -114,12 +114,20 @@ class AlpacaBroker(BrokerClient):
             MarketOrderRequest,
             StopLimitOrderRequest,
             StopOrderRequest,
+            TrailingStopOrderRequest,
         )
 
         side = ASide.BUY if intent.side == OrderSide.BUY else ASide.SELL
         tif = ATIF.GTC if intent.time_in_force == TimeInForce.GTC else ATIF.DAY
         qty = float(intent.qty)
-        common = dict(symbol=intent.symbol, qty=qty, side=side, time_in_force=tif)
+        # client_order_id garante idempotencia: retry com o mesmo id e rejeitado.
+        common = dict(
+            symbol=intent.symbol,
+            qty=qty,
+            side=side,
+            time_in_force=tif,
+            client_order_id=intent.client_order_id,
+        )
 
         if intent.order_type == OrderType.MARKET:
             return MarketOrderRequest(**common)
@@ -133,11 +141,47 @@ class AlpacaBroker(BrokerClient):
                 limit_price=float(intent.limit_price),
                 **common,
             )
+        if intent.order_type == OrderType.TRAILING_STOP:
+            # Trailing stop nativo (server-side): sobrevive a crash do bot.
+            return TrailingStopOrderRequest(
+                trail_percent=float(intent.trail_percent), **common
+            )
         raise ValueError(f"order_type nao suportado: {intent.order_type}")
 
     def cancel_all_orders(self) -> int:
         responses = self._trading.cancel_orders()
         return len(responses) if responses else 0
+
+    def get_open_orders(self) -> list[BrokerOrder]:
+        from alpaca.trading.enums import QueryOrderStatus
+        from alpaca.trading.requests import GetOrdersRequest
+
+        orders = self._trading.get_orders(
+            GetOrdersRequest(status=QueryOrderStatus.OPEN)
+        )
+        return [self._to_broker_order(o) for o in (orders or [])]
+
+    def get_order_by_client_id(self, client_order_id: str) -> BrokerOrder | None:
+        from alpaca.common.exceptions import APIError
+
+        try:
+            o = self._trading.get_order_by_client_id(client_order_id)
+        except APIError:
+            return None
+        return self._to_broker_order(o) if o else None
+
+    @staticmethod
+    def _to_broker_order(o) -> BrokerOrder:
+        return BrokerOrder(
+            broker_order_id=str(o.id),
+            client_order_id=getattr(o, "client_order_id", None),
+            symbol=o.symbol,
+            side=str(getattr(o.side, "value", o.side)),
+            qty=_to_decimal(getattr(o, "qty", 0)),
+            filled_qty=_to_decimal(getattr(o, "filled_qty", 0)),
+            status=str(getattr(o.status, "value", o.status)),
+            order_type=str(getattr(o, "order_type", getattr(o, "type", "unknown"))),
+        )
 
     def is_market_open(self) -> bool:
         return bool(self._trading.get_clock().is_open)
@@ -191,6 +235,7 @@ class AlpacaBroker(BrokerClient):
             qty=float(intent.qty),
             side=side,
             time_in_force=ATIF.DAY,
+            client_order_id=intent.client_order_id,
         )
         order = self._trading.submit_order(req)
         return OrderResult(

@@ -23,12 +23,16 @@ from config.settings import LiveTradingBlockedError, get_settings
 from config.watchlist import load_watchlist
 from core.kill_switch import KillSwitch
 from core.market_clock import MarketClock
+from data.audit_log import AuditLog
 from data.db import Database
+from data.order_repo import OrderRepository
+from data.position_repo import PositionRepository
 from data.signal_repo import SignalRepository
 from data.state_repo import StateRepository
 from data.trade_logger import TradeLogger
 from orchestration.base import AgentOrchestrator
 from orchestration.factory import build_orchestrator
+from orchestration.reconcile import reconcile
 from strategies.ladder_buys import LadderBuysStrategy
 from strategies.signals.base import SignalService
 from strategies.signals.congress import CongressTradingProvider, StaticCongressSource
@@ -62,8 +66,17 @@ def build_app(
     state = StateRepository(db)
     trade_logger = TradeLogger(db)
     signal_repo = SignalRepository(db)
+    order_repo = OrderRepository(db)
+    position_repo = PositionRepository(db)
+    audit = AuditLog(db)
     kill_switch = KillSwitch()
     watchlist = load_watchlist()
+
+    # Reconciliacao no boot: broker = fonte de verdade, ANTES de qualquer ciclo.
+    try:
+        reconcile(broker, order_repo, position_repo, audit)
+    except Exception:
+        logger.exception("Falha na reconciliacao de boot; seguindo com cautela.")
 
     # Sinais (Nivel 2): providers atras de fontes swappable. Por padrao usam
     # fontes estaticas VAZIAS (nenhum sinal real) — seguro e pronto p/ plugar
@@ -86,7 +99,9 @@ def build_app(
         signal_service=signal_service,
         signal_repo=signal_repo,
     )
-    executor = Executor(broker, trade_logger, kill_switch)
+    executor = Executor(
+        broker, trade_logger, kill_switch, order_repo=order_repo, audit=audit
+    )
     # Orquestrador selecionado por config (factory). Trocar p/ OpenSquad depois
     # e so mudar ORCHESTRATOR no .env (e fornecer um OrchestratorBridge).
     orchestrator = build_orchestrator(orchestrator_name, planner, executor)

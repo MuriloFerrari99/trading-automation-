@@ -29,18 +29,25 @@ CREATE TABLE IF NOT EXISTS trade_log (
     status          TEXT    NOT NULL DEFAULT 'submitted'
 );
 
+-- Ciclo de vida da ordem. client_order_id (idempotencia) e UNICO. A linha e
+-- gravada como PENDING_SUBMIT ANTES da chamada de rede; depois SUBMITTED com o
+-- broker_order_id; depois FILLED/PARTIALLY_FILLED/REJECTED/CANCELED.
 CREATE TABLE IF NOT EXISTS orders (
-    id              INTEGER PRIMARY KEY AUTOINCREMENT,
-    ts              TEXT    NOT NULL,
-    symbol          TEXT    NOT NULL,
-    side            TEXT    NOT NULL,
-    qty             TEXT    NOT NULL,
-    order_type      TEXT    NOT NULL,
-    limit_price     TEXT,
-    stop_price      TEXT,
-    strategy        TEXT    NOT NULL,
-    broker_order_id TEXT,
-    status          TEXT    NOT NULL DEFAULT 'accepted'
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    client_order_id  TEXT    NOT NULL UNIQUE,
+    ts               TEXT    NOT NULL,
+    symbol           TEXT    NOT NULL,
+    side             TEXT    NOT NULL,
+    qty              TEXT    NOT NULL,
+    order_type       TEXT    NOT NULL,
+    limit_price      TEXT,
+    stop_price       TEXT,
+    strategy         TEXT    NOT NULL,
+    broker_order_id  TEXT,
+    status           TEXT    NOT NULL DEFAULT 'PENDING_SUBMIT',
+    filled_qty       TEXT    NOT NULL DEFAULT '0',
+    filled_avg_price TEXT,
+    updated_at       TEXT    NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS positions (
@@ -54,6 +61,17 @@ CREATE TABLE IF NOT EXISTS state (
     key             TEXT    PRIMARY KEY,
     value           TEXT    NOT NULL,
     updated_at      TEXT    NOT NULL
+);
+
+-- Trilha de auditoria: o "porque" de cada decisao/ordem, com o ATOR
+-- (Planner/Executor/Monitor/system) que a produziu.
+CREATE TABLE IF NOT EXISTS audit_log (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    ts              TEXT    NOT NULL,
+    actor           TEXT    NOT NULL,   -- planner | executor | monitor | system
+    event           TEXT    NOT NULL,
+    symbol          TEXT,
+    payload         TEXT                -- JSON livre
 );
 
 -- Sinais/sugestoes (Nivel 2). NUNCA executam automaticamente: sao apenas

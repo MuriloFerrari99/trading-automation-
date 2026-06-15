@@ -8,6 +8,7 @@ corretora e, no futuro, trocar de corretora sem reescrever a logica.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from decimal import Decimal
 
 from core.models import (
@@ -18,6 +19,20 @@ from core.models import (
     OrderResult,
     Position,
 )
+
+
+@dataclass
+class BrokerOrder:
+    """Visao de uma ordem no broker (para reconciliacao broker=verdade)."""
+
+    broker_order_id: str
+    client_order_id: str | None
+    symbol: str
+    side: str
+    qty: Decimal
+    filled_qty: Decimal
+    status: str  # status cru do broker (ex: new, filled, partially_filled, canceled)
+    order_type: str
 
 
 class AccountInfo:
@@ -73,6 +88,14 @@ class BrokerClient(ABC):
     @abstractmethod
     def cancel_all_orders(self) -> int:
         """Cancela todas as ordens abertas. Retorna quantas foram canceladas."""
+
+    @abstractmethod
+    def get_open_orders(self) -> list[BrokerOrder]:
+        """Ordens abertas no broker (para reconciliacao)."""
+
+    @abstractmethod
+    def get_order_by_client_id(self, client_order_id: str) -> BrokerOrder | None:
+        """Busca uma ordem pelo client_order_id (idempotencia em retry)."""
 
     @abstractmethod
     def is_market_open(self) -> bool:

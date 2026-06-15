@@ -10,7 +10,7 @@ import itertools
 from datetime import date, timedelta
 from decimal import Decimal
 
-from broker.base import AccountInfo, BrokerClient
+from broker.base import AccountInfo, BrokerClient, BrokerOrder
 from core.models import (
     OptionContract,
     OptionOrderIntent,
@@ -18,6 +18,7 @@ from core.models import (
     OrderIntent,
     OrderResult,
     OrderSide,
+    OrderType,
     Position,
 )
 
@@ -43,6 +44,9 @@ class FakeBroker(BrokerClient):
         self._order_ids = itertools.count(1)
         self.submitted: list[OrderIntent] = []  # historico p/ asserts em testes
         self.submitted_options: list[OptionOrderIntent] = []
+        # Idempotencia + reconciliacao: ordens conhecidas por client_order_id.
+        self._orders_by_cid: dict[str, BrokerOrder] = {}
+        self._open_orders: dict[str, BrokerOrder] = {}  # por broker_order_id
 
     # --- helpers de teste ---------------------------------------------------
     def set_price(self, symbol: str, price: Decimal | str | float) -> None:
@@ -106,11 +110,49 @@ class FakeBroker(BrokerClient):
         return self._prices[symbol]
 
     def submit_order(self, intent: OrderIntent) -> OrderResult:
+        # Idempotencia: mesmo client_order_id => devolve a ordem existente sem
+        # reaplicar o fill (simula a rejeicao de duplicado pelo broker).
+        cid = intent.client_order_id
+        if cid is not None and cid in self._orders_by_cid:
+            return self._as_result(self._orders_by_cid[cid])
+
         self.submitted.append(intent)
+        broker_id = f"fake-{next(self._order_ids)}"
+
+        # Trailing stop nativo: fica ABERTO no broker (nao preenche na hora).
+        if intent.order_type == OrderType.TRAILING_STOP:
+            order = BrokerOrder(
+                broker_order_id=broker_id,
+                client_order_id=cid,
+                symbol=intent.symbol,
+                side=intent.side.value,
+                qty=intent.qty,
+                filled_qty=Decimal(0),
+                status="new",
+                order_type="trailing_stop",
+            )
+            if cid:
+                self._orders_by_cid[cid] = order
+            self._open_orders[broker_id] = order
+            return self._as_result(order)
+
+        # Demais tipos: preenchem imediatamente.
         fill_price = self._prices.get(intent.symbol, intent.limit_price or Decimal("1"))
         self._apply_fill(intent, fill_price)
+        order = BrokerOrder(
+            broker_order_id=broker_id,
+            client_order_id=cid,
+            symbol=intent.symbol,
+            side=intent.side.value,
+            qty=intent.qty,
+            filled_qty=intent.qty,
+            status="filled",
+            order_type=intent.order_type.value,
+        )
+        if cid:
+            self._orders_by_cid[cid] = order
         return OrderResult(
-            broker_order_id=f"fake-{next(self._order_ids)}",
+            broker_order_id=broker_id,
             symbol=intent.symbol,
             side=intent.side,
             qty=intent.qty,
@@ -118,6 +160,24 @@ class FakeBroker(BrokerClient):
             filled_avg_price=fill_price,
             status="filled",
         )
+
+    @staticmethod
+    def _as_result(order: BrokerOrder) -> OrderResult:
+        return OrderResult(
+            broker_order_id=order.broker_order_id,
+            symbol=order.symbol,
+            side=OrderSide(order.side),
+            qty=order.qty,
+            filled_qty=order.filled_qty,
+            filled_avg_price=None,
+            status=order.status,
+        )
+
+    def seed_open_order(self, order: BrokerOrder) -> None:
+        """Insere uma ordem aberta no broker (p/ testes de reconciliacao)."""
+        self._open_orders[order.broker_order_id] = order
+        if order.client_order_id:
+            self._orders_by_cid[order.client_order_id] = order
 
     def _apply_fill(self, intent: OrderIntent, fill_price: Decimal) -> None:
         symbol = intent.symbol
@@ -143,7 +203,15 @@ class FakeBroker(BrokerClient):
             )
 
     def cancel_all_orders(self) -> int:
-        return 0  # FakeBroker preenche ordens imediatamente; nada pendente.
+        n = len(self._open_orders)
+        self._open_orders.clear()
+        return n
+
+    def get_open_orders(self) -> list[BrokerOrder]:
+        return list(self._open_orders.values())
+
+    def get_order_by_client_id(self, client_order_id: str) -> BrokerOrder | None:
+        return self._orders_by_cid.get(client_order_id)
 
     def is_market_open(self) -> bool:
         return self._market_open
@@ -179,14 +247,30 @@ class FakeBroker(BrokerClient):
         )
 
     def submit_option_order(self, intent: OptionOrderIntent) -> OrderResult:
+        cid = intent.client_order_id
+        if cid is not None and cid in self._orders_by_cid:
+            return self._as_result(self._orders_by_cid[cid])  # idempotente
+
         self.submitted_options.append(intent)
         # Premio simulado: 1% do strike por acao (100 acoes por contrato).
         premium_per_share = intent.contract.strike * Decimal("0.01")
         premium = premium_per_share * Decimal(100) * intent.qty
         if intent.side == OrderSide.SELL:
             self._cash += premium  # vender premio credita caixa
+        broker_id = f"fake-opt-{next(self._order_ids)}"
+        if cid:
+            self._orders_by_cid[cid] = BrokerOrder(
+                broker_order_id=broker_id,
+                client_order_id=cid,
+                symbol=intent.contract.occ_symbol,
+                side=intent.side.value,
+                qty=intent.qty,
+                filled_qty=intent.qty,
+                status="filled",
+                order_type="option",
+            )
         return OrderResult(
-            broker_order_id=f"fake-opt-{next(self._order_ids)}",
+            broker_order_id=broker_id,
             symbol=intent.contract.occ_symbol,
             side=intent.side,
             qty=intent.qty,

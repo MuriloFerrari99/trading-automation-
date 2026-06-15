@@ -26,7 +26,7 @@ def test_extrai_apenas_decisoes_fechadas():
     ]
     ts = build_training_set(records)
     assert len(ts) == 2
-    assert ts.X.shape == (2, 2 + len(REGIMES))  # 2 ctx + one-hot de regime
+    assert ts.X.shape == (2, len(ts.feature_names))  # ctx + one-hot de regime
     assert list(ts.y) == [1, 0]
     assert list(ts.pnl) == [100.0, -50.0]
 
@@ -51,4 +51,4 @@ def test_contexto_invalido_nao_quebra():
 def test_vazio_retorna_shape_coerente():
     ts = build_training_set([])
     assert len(ts) == 0
-    assert ts.X.shape == (0, 2 + len(REGIMES))
+    assert ts.X.shape == (0, len(ts.feature_names))

@@ -21,6 +21,7 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 | 11 | [research/11-camada-ml.md](research/11-camada-ml.md) | **Camada 2 — ML (implementada, `ml/`):** classificador P(win) de setup (logística numpy) em champion/challenger; promove só com skill comprovado (IC99 AUC) + expectancy; cold-start seguro |
 | 12 | [research/12-sizing-dinamico.md](research/12-sizing-dinamico.md) | **Sizing dinâmico (implementado, `sizing/`):** tamanho por convicção via Kelly fracionário (¼), teto/piso, qty 0 sem edge; compõe `risk/sizing` |
 | 13 | [research/13-camada-sintese.md](research/13-camada-sintese.md) | **Camada 3 — síntese (implementada, `synthesis/`):** combina visões ortogonais (técnico/smart money/ML/regime) em convicção + consenso/conflito + racional; hook LLM opcional |
+| 14 | [research/14-integracao.md](research/14-integracao.md) | **Integração (implementada, `integration/`):** `DecisionEnricher` compõe FimatheEngine+síntese+ML+sizing num ponto; degrada com graça; sem leak no ML; snippet de wiring |
 
 **Fontes brutas:** [research/fontes/](research/fontes/) — transcrições de áudio que embasam docs (ex.: `fimathe-ouro-transcricao.txt`).
 

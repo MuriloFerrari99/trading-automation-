@@ -65,7 +65,7 @@ mobiliários (ações, bonds, futures, opções etc.) **acima de US$ 1.000** por
 |---|---|---|---|---|---|
 | **House Clerk disclosures** | Oficial primária | Sim | Não (sem API; ZIP/XML + PDFs) | XML índice + **PDF dos PTRs** | PDFs frequentemente escaneados → exige OCR/parsing pesado |
 | **Senate eFD** | Oficial primária | Sim | Não (busca web, exige aceitar termos) | HTML/PDF | Scraping mais hostil; sessão/cookies |
-| **Capitol Trades** | Agregador | Sim (web) | **Não há API pública oficial documentada** | Web (HTML) | Excelente UI; consumo programático = scraping ou wrappers de terceiros |
+| **Capitol Trades** | Agregador | Sim (web + API interna) | **Sem API _oficial_; existe BFF interno não-documentado** (`bff.capitoltrades.com/trades`) | JSON | Melhor custo-benefício gratuito; endpoint instável/ToS — ver §2.1 |
 | **Quiver Quantitative** | Agregador + API | Tier grátis (atrasado/limitado) | **Sim** | JSON | Pago a partir de ~US$ 25–30/mês; endpoints separados House/Senate |
 | **Unusual Whales** | Agregador + API | Tier grátis limitado | **Sim** (100+ endpoints) | JSON / OpenAPI | API paga (Basic ~US$150/mês, Advanced ~US$375/mês em 2025); inclui cônjuge/dependente |
 | **ETFs NANC / GOP (ex-KRUZ)** | Produto investível | Compra na bolsa | N/A | — | Replicação "pronta", taxa 0,75% |
@@ -83,10 +83,82 @@ mobiliários (ações, bonds, futures, opções etc.) **acima de US$ 1.000** por
   Capitol Trades, Quiver e Unusual Whales preenchem.
 
 **Capitol Trades** — `https://www.capitoltrades.com`
-- Agregador gratuito com ótima UI (filtros por político, ticker, comitê).
-- **Sem API pública oficial documentada.** Acesso programático = scraping do HTML ou wrappers
-  não-oficiais de terceiros (ex.: pacotes comunitários, scrapers do tipo Lambda Finance). Use com cautela:
-  pode quebrar e violar ToS.
+- Agregador gratuito com ótima UI (filtros por político, ticker, comitê), já com **ticker normalizado**
+  e **faixas de valor parseadas** — exatamente o trabalho pesado que o feed oficial não entrega.
+- **Sem API pública oficial documentada**, mas o site é alimentado por uma **API interna do tipo BFF
+  (Backend-for-Frontend)** que retorna JSON limpo. É a forma mais prática de usar o Capitol Trades como
+  **banco de dados** do bot. Detalhes completos em **§2.1** abaixo. Provider pronto em **§7**.
+
+---
+
+### 2.1. Capitol Trades como banco de dados (API interna BFF)
+
+> ⚠️ **Status (verificado em jun/2026):** este endpoint é **não-oficial e não-suportado**. Ele é
+> protegido por CloudFront e, num teste direto, **retornou `503` para `curl` simples** — ou seja, exige
+> headers de browser corretos e pode ser bloqueado, ter rate-limit agressivo ou mudar sem aviso. **Não é
+> uma dependência de produção confiável.** Trate como *best-effort*, com cache local e fallback. O uso
+> programático pode também conflitar com os **Termos de Serviço** do site — revise antes de usar comercialmente.
+
+**Endpoint principal**
+```
+GET https://bff.capitoltrades.com/trades?page=<n>&pageSize=<=100>
+```
+- `pageSize` máximo **100**; pagine com `page` até cobrir `meta.paging.totalItems`.
+- Outros parâmetros observados na UI (passados como repetição de query string):
+  `txDate=<YYYY-MM-DD>`, `politician=<politicianId>`, `issuer=<issuerId>`, `assetType`,
+  `txType=buy|sell`, `chamber=house|senate`, `sortBy=-txDate` (prefixo `-` = desc).
+
+**Headers necessários** (sem eles → 403/503):
+```
+User-Agent: Mozilla/5.0 (... browser real ...)
+Accept: application/json, text/plain, */*
+Referer: https://www.capitoltrades.com/
+Origin:  https://www.capitoltrades.com
+```
+
+**Formato da resposta**
+```jsonc
+{
+  "data": [ /* lista de trades */ ],
+  "meta": { "paging": { "page": 1, "size": 100, "totalItems": 12345, "totalPages": 124 } }
+}
+```
+
+**Schema de um trade** (campos reconstruídos a partir de wrappers comunitários — *confirme contra a
+resposta real ao implementar, pois nomes podem mudar*):
+
+| Campo | Significado | Mapeia p/ `Signal` |
+|---|---|---|
+| `_txId` | ID único da transação | `raw` / dedup |
+| `txDate` | Data da transação (`YYYY-MM-DD`) | `traded_at` |
+| `pubDate` | Data da publicação (`...Z`) | `filed_at` |
+| `txType` | `buy` / `sell` / `exchange` / `receive` | `side` |
+| `owner` | self / spouse / child / joint | ponderação de `confidence` |
+| `politician.fullName` (`firstName`+`lastName`) | Nome do congressista | `actor` |
+| `politician.party` | `democrat` / `republican` / ... | `raw` (ranking) |
+| `politician.chamber` (ou `chamber`) | `house` / `senate` | `raw` |
+| `issuer.issuerTicker` | Ticker (ex.: `NVDA`) | `ticker` |
+| `issuer.issuerName` | Nome da empresa | `raw` |
+| `asset.assetType` | `stock` / `stock-options` / `etf` / ... | filtro |
+| `size` | Bucket textual (ex.: `"1K–15K"`) | — |
+| `sizeRangeLow` / `sizeRangeHigh` | Faixa numérica em USD | `size_usd_low` / `size_usd_high` |
+| `value` | Valor estimado (mid da faixa) | `raw` |
+| `price` | Preço do ativo na data (quando disponível) | `raw` |
+
+**Estratégias de acesso (em ordem de preferência):**
+1. **BFF direto** (§7) — mais simples; sujeito a bloqueio. Mantenha cache em SQLite e *backoff*.
+2. **Wrappers/MCP comunitários** — ex.: servidor MCP `mcp-capitol-trades`, libs como `CongressionalTrader`.
+   Úteis como referência de headers/parsing, mas herdam a mesma fragilidade do BFF.
+3. **Serviços de scraping gerenciado** (Apify "Capitol Trades Scraper", ScrapingBee) — pagos, mas
+   absorvem anti-bot/manutenção. Bom se o BFF ficar instável.
+4. **Fallback robusto:** se o objetivo é confiabilidade contratual, prefira **Quiver/Unusual Whales (pagos,
+   com SLA)** ou a **fonte oficial** (House/Senate) — Capitol Trades é o melhor *gratuito*, não o mais estável.
+
+**Fontes (acesso programático ao Capitol Trades):**
+- [ericz1803/CongressionalTrader — cliente Python do BFF](https://github.com/ericz1803/CongressionalTrader/blob/master/capitoltrades/CapitolTrades.py)
+- [anguslin/mcp-capitol-trades — servidor MCP (sem API key)](https://github.com/anguslin/mcp-capitol-trades)
+- [Apify — Capitol Trades Scraper API](https://apify.com/saswave/capitol-trades-scraper/api)
+- [Lambda Finance — Best Capitol Trades APIs (2026)](https://www.lambdafin.com/articles/capitol-trades-api)
 
 **Quiver Quantitative** — `https://www.quiverquant.com/congresstrading/`
 - **API documentada e oficial:** `https://api.quiverquant.com/`
@@ -422,6 +494,112 @@ class SecEdgarProvider(SignalProvider):
                     confidence=0.5,
                     raw={"accession": accn, "cik": cik10, "doc_url": f"{base_dir}/{doc}"},
                 )
+
+
+# --------------- Provider concreto: Capitol Trades (BFF não-oficial) ---------- #
+
+class CapitolTradesProvider(SignalProvider):
+    """
+    Consome a API interna (BFF) do Capitol Trades como banco de dados de trades
+    do Congresso. NÃO-OFICIAL: endpoint protegido por CloudFront, exige headers de
+    browser, pode retornar 503/403 ou mudar sem aviso. Use cache + backoff e
+    trate como best-effort (ver §2.1). Para produção com SLA, prefira Quiver/UW.
+    """
+
+    name = "capitol_trades"
+    actor_class = ActorClass.CONGRESS
+    BASE = "https://bff.capitoltrades.com"
+
+    # txType do Capitol Trades -> Side normalizado
+    _SIDE = {"buy": Side.BUY, "sell": Side.SELL}
+
+    def __init__(self, min_interval_s: float = 1.0, max_pages: int = 10):
+        self.min_interval_s = min_interval_s   # rate-limit defensivo (endpoint frágil)
+        self.max_pages = max_pages             # teto de segurança de paginação
+        self.headers = {
+            # Use um User-Agent de browser real e atual:
+            "User-Agent": ("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                           "AppleWebKit/537.36 (KHTML, like Gecko) "
+                           "Chrome/124.0 Safari/537.36"),
+            "Accept": "application/json, text/plain, */*",
+            "Referer": "https://www.capitoltrades.com/",
+            "Origin": "https://www.capitoltrades.com",
+        }
+
+    def _get(self, page: int) -> dict:
+        time.sleep(self.min_interval_s)
+        resp = requests.get(
+            f"{self.BASE}/trades",
+            params={"page": page, "pageSize": 100, "sortBy": "-txDate"},
+            headers=self.headers, timeout=30,
+        )
+        resp.raise_for_status()          # 503/403 -> RequestException (tratar no chamador)
+        return resp.json()
+
+    def healthcheck(self) -> bool:
+        try:
+            self._get(page=1)
+            return True
+        except requests.RequestException:
+            return False                 # caiu? agregador segue com os outros providers
+
+    def fetch(self, since: dt.date) -> Iterable[Signal]:
+        """Emite Signals com filed_at (pubDate) >= since, paginando do mais recente."""
+        for page in range(1, self.max_pages + 1):
+            payload = self._get(page)
+            rows = payload.get("data", [])
+            if not rows:
+                break
+
+            stop = False
+            for tx in rows:
+                filed_at = _parse_date(tx.get("pubDate"))
+                if filed_at is None:
+                    continue
+                if filed_at < since:     # como vem ordenado desc, podemos parar
+                    stop = True
+                    break
+
+                side = self._SIDE.get((tx.get("txType") or "").lower())
+                if side is None:         # ignora exchange/receive p/ sinal direcional
+                    continue
+
+                issuer = tx.get("issuer") or {}
+                pol = tx.get("politician") or {}
+                ticker = (issuer.get("issuerTicker") or "").upper().strip()
+                if not ticker or ticker in {"--", "N/A"}:
+                    continue             # opções/ativos sem ticker negociável -> pula
+
+                yield Signal(
+                    ticker=ticker,
+                    side=side,
+                    actor=pol.get("fullName")
+                          or f"{pol.get('firstName','')} {pol.get('lastName','')}".strip()
+                          or "unknown",
+                    actor_class=self.actor_class,
+                    traded_at=_parse_date(tx.get("txDate")),
+                    filed_at=filed_at,
+                    size_usd_low=tx.get("sizeRangeLow"),
+                    size_usd_high=tx.get("sizeRangeHigh"),
+                    source="capitol_trades:bff",
+                    # owner != self (cônjuge/filho) costuma carregar menos sinal:
+                    confidence=0.55 if (tx.get("owner") == "self") else 0.45,
+                    raw=tx,
+                )
+
+            page_meta = payload.get("meta", {}).get("paging", {})
+            if stop or page >= page_meta.get("totalPages", page):
+                break
+
+
+def _parse_date(s: str | None) -> dt.date | None:
+    """Aceita 'YYYY-MM-DD' e ISO com 'Z' (ex.: 2026-01-15T00:00:00Z)."""
+    if not s:
+        return None
+    try:
+        return dt.date.fromisoformat(s[:10])
+    except ValueError:
+        return None
 
 
 # ------------------------- Agregador (consenso/ranking) ----------------------- #

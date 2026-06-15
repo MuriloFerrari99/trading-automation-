@@ -57,6 +57,25 @@ class BacktestResult:
     metrics: PerfMetrics
 
 
+def _make_sim_risk(cash: float):
+    from config.risk import RiskSettings
+    from risk.manager import RiskManager
+    from risk.portfolio_guard import PortfolioRiskGuard
+
+    return RiskManager(RiskSettings(_env_file=None), PortfolioRiskGuard(Decimal(str(cash))))
+
+
+def _route_risk(intents, sim, risk):
+    equity = sim.get_account().equity
+    positions = sim.get_positions()
+    out = []
+    for it in intents:
+        d = risk.assess(it, equity, positions, sim.get_last_price(it.symbol))
+        if d.approved and d.intent is not None:
+            out.append(d.intent)
+    return out
+
+
 def _watchlist_for(symbol: str, strategy_name: str) -> Watchlist:
     if strategy_name == "trailing_stop":
         return Watchlist(items=[WatchlistItem(symbol=symbol, trailing_stop_pct=Decimal("0.10"))])
@@ -79,11 +98,23 @@ def run_backtest(
     commission_bps: float = 5.0,
     slippage_bps: float = 5.0,
     warmup: int = 35,
+    use_risk: bool = False,
+    gate=None,
 ) -> BacktestResult | None:
     closes = ohlc["close"]
     n = len(closes)
     if n < warmup + 5:
         return None
+
+    regime = classify_regime([float(c) for c in closes]).value
+
+    # Gate de regime (config C): se o combo estrategia@regime foi vetado no
+    # treino, a estrategia NAO opera nesta janela — fica flat (retorno 0).
+    if gate is not None and not gate.allow(strategy_name, regime):
+        return BacktestResult(
+            symbol=symbol, strategy=strategy_name, regime=regime,
+            metrics=compute_metrics(np.asarray([cash, cash], dtype=float), [], n_bars=1, bars_in_market=0),
+        )
 
     sim = SimBroker(
         symbol, ohlc["open"], ohlc["high"], ohlc["low"], closes,
@@ -92,6 +123,7 @@ def run_backtest(
     state = _SimState()
     wl = _watchlist_for(symbol, strategy_name)
     strategy = TrailingStopStrategy() if strategy_name == "trailing_stop" else LadderBuysStrategy()
+    risk = _make_sim_risk(cash) if use_risk else None
 
     for i in range(n):
         sim.set_index(i)
@@ -109,14 +141,17 @@ def run_backtest(
 
         sim.update_trailing_and_maybe_trigger()
         ctx = StrategyContext(broker=sim, state=state, watchlist=wl)
-        for intent in strategy.evaluate(ctx):
+        intents = strategy.evaluate(ctx)
+        if risk is not None and intents:
+            risk.begin_cycle(sim.get_account().equity)
+            intents = _route_risk(intents, sim, risk)
+        for intent in intents:
             sim.submit_order(intent)
         sim.mark_equity()
 
     sim.set_index(n - 1)
     sim.liquidate_final()
 
-    regime = classify_regime([float(c) for c in closes]).value
     metrics = compute_metrics(
         np.asarray(sim.equity_curve, dtype=float),
         sim.trade_pnls,

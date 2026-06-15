@@ -40,6 +40,8 @@ def run_sweep(
     commission_bps: float = 5.0,
     slippage_bps: float = 5.0,
     max_runs: int | None = None,
+    use_risk: bool = False,
+    gate=None,
 ) -> list[BacktestResult]:
     results: list[BacktestResult] = []
     for symbol, ohlc in data.items():
@@ -50,6 +52,7 @@ def run_sweep(
                 r = run_backtest(
                     symbol, window, strat,
                     commission_bps=commission_bps, slippage_bps=slippage_bps,
+                    use_risk=use_risk, gate=gate,
                 )
                 if r is not None:
                     results.append(r)

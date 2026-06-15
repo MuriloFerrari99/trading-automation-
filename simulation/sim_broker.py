@@ -73,6 +73,7 @@ class SimBroker:
             fills.append({
                 "symbol": self._symbol, "side": intent.side.value,
                 "filled_qty": intent.qty, "fill_price": price,
+                "client_order_id": getattr(intent, "client_order_id", None),
             })
         self._pending = []
         return fills

@@ -19,6 +19,7 @@ Documentação de pesquisa que fundamenta a construção deste bot de trading. C
 | 09 | [research/09-loop-de-feedback.md](research/09-loop-de-feedback.md) | **Camada 0 (implementada):** loop de feedback — registro decisão+contexto+resultado, classificador de regime e avaliação por estratégia/regime (pacote `feedback/`) |
 | 10 | [research/10-camada-decisao.md](research/10-camada-decisao.md) | **Camada de decisão (implementada):** gate por regime que veta combos estratégia×regime com edge negativo + score por sinais (pacote `intelligence/`), fiado no `LocalOrchestrator`/`main` |
 | 11 | [research/11-camada-ml.md](research/11-camada-ml.md) | **Camada 2 — ML (implementada, `ml/`):** classificador P(win) de setup (logística numpy) em champion/challenger; promove só com skill comprovado (IC99 AUC) + expectancy; cold-start seguro |
+| 12 | [research/12-sizing-dinamico.md](research/12-sizing-dinamico.md) | **Sizing dinâmico (implementado, `sizing/`):** tamanho por convicção via Kelly fracionário (¼), teto/piso, qty 0 sem edge; compõe `risk/sizing` |
 
 **Fontes brutas:** [research/fontes/](research/fontes/) — transcrições de áudio que embasam docs (ex.: `fimathe-ouro-transcricao.txt`).
 

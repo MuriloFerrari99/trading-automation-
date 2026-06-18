@@ -12,6 +12,10 @@ dependencies = [
     "apscheduler>=3.10",
     "pyyaml>=6.0",
     "pandas>=2.2",
+    "yfinance>=1.4.1",
+    "dukascopy-python>=4.0",
+    "quantstats>=0.0.62",
+    "nautilus-trader>=1.221.0",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +23,32 @@ dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
     "ruff>=0.4",
+]
+
+# Extras do Radar de Stack (Segundo Murilo). Ficam FORA do core para nao inchar
+# nem arriscar o resolve principal — instalam sob demanda: `uv sync --extra quant-ml`.
+# Nada baixado nesta maquina ainda; declaracao para instalar quando houver disco/CI.
+quant-ml = [        # ML-quant: backbone de alphas/modelos, RL e features de serie temporal
+    "pyqlib>=0.9",      # microsoft/qlib (nome PyPI: pyqlib)
+    "finrl>=0.3",       # AI4Finance/FinRL — reinforcement learning para trading
+    "tsfresh>=0.20",    # extracao automatica de features de series temporais
+]
+portfolio = [       # otimizacao de carteira e risco
+    "Riskfolio-Lib>=6.0",
+    "PyPortfolioOpt>=1.5",
+]
+ta = [              # analise tecnica / feature engineering
+    "pandas-ta-classic>=0.6",  # sucessor vivo do pandas-ta (NAO usar pandas-ta do PyPI: supply-chain)
+    "TA-Lib>=0.6.5",           # ja tem wheels pre-compiladas desde 0.6.5
+]
+research = [        # backtesting vetorizado para sweeps de parametros
+    "vectorbt>=0.27",
+]
+data = [            # fontes/manuseio de dados (Polars + provedores)
+    "polars>=1.0",
+    "ccxt>=4.0",
+    "databento>=0.40",
+    "financedatabase>=2.2",
 ]
 
 [build-system]
@@ -39,6 +69,7 @@ packages = [
     "intelligence",
     "ml",
     "orchestration",
+    "reporting",
     "risk",
     "scheduling",
     "simulation",

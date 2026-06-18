@@ -93,6 +93,34 @@ def generate_report(
     return out
 
 
+def capture_and_report(
+    broker,
+    *,
+    repo: NavHistoryRepo | None = None,
+    db_path: Path | str = DEFAULT_DB_PATH,
+    state=None,
+    regime: str = "unknown",
+    day=None,
+    output: Path | str = DEFAULT_OUTPUT,
+    benchmark: bool = True,
+) -> dict:
+    """Ponto de plug do EOD: grava o snapshot de NAV do dia E regenera o tearsheet.
+
+    E o que torna o tearsheet AUTOMATICO — quando agendado pos-fechamento (ver
+    reporting/eod_job.register_eod_report_job), cada ciclo atualiza o NAV e o
+    relatorio juntos. Idempotente por dia (capture_eod faz UPSERT).
+
+    Retorna {"nav_row": <linha gravada>, "report": <caminho do html ou None>}.
+    """
+    from reporting.capture import capture_eod  # import tardio: evita ciclo broker<-reporting
+
+    row = capture_eod(
+        broker, repo=repo, db_path=db_path, state=state, regime=regime, day=day
+    )
+    path = generate_report(output, db_path=db_path, repo=repo, benchmark=benchmark)
+    return {"nav_row": row, "report": str(path) if path else None}
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Tearsheet QuantStats do NAV real.")
     ap.add_argument("-o", "--output", default=str(DEFAULT_OUTPUT))

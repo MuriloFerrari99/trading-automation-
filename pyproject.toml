@@ -50,6 +50,9 @@ data = [            # fontes/manuseio de dados (Polars + provedores)
     "databento>=0.40",
     "financedatabase>=2.2",
 ]
+obs = [             # observabilidade dos agentes/reasoner (Langfuse, env-gated)
+    "langfuse>=3.0",
+]
 
 [build-system]
 requires = ["hatchling"]

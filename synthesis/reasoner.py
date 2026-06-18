@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
+from synthesis.observability import observe_generation
 from synthesis.views import Direction, View
 
 
@@ -58,7 +59,8 @@ class LLMReasoner:
     """Racional via LLM injetado. `call_fn(prompt) -> str`. Fallback no template."""
 
     def __init__(self, call_fn: Callable[[str], str]) -> None:
-        self._call = call_fn
+        # Env-gated: traca a geracao no Langfuse quando ha chaves; senao, no-op.
+        self._call = observe_generation("synthesis.llm_reasoner")(call_fn)
         self._fallback = TemplateReasoner()
 
     def _prompt(self, symbol, views, direction, conviction, agreement) -> str:

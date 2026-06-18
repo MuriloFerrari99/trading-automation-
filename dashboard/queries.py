@@ -12,6 +12,7 @@ opcional e injetado de fora (ver `dashboard.broker_view`).
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -169,10 +170,8 @@ def _recent_audit(conn: sqlite3.Connection, limit: int = 40) -> list[dict]:
     for r in rows:
         payload = r.get("payload")
         if payload:
-            try:
+            with contextlib.suppress(ValueError, TypeError):
                 r["payload"] = json.loads(payload)
-            except (ValueError, TypeError):
-                pass  # mantem string crua se nao for JSON
     return rows
 
 
@@ -247,6 +246,101 @@ def _pnl_curve(closed: list[dict]) -> list[dict]:
     return out
 
 
+def _nav_rows(conn: sqlite3.Connection) -> list[dict]:
+    """Linhas EOD de nav_history em ordem cronologica (somente-leitura).
+
+    Le do mesmo arquivo SQLite que o resto do dashboard, sem escrever nem migrar
+    schema. So o snapshot oficial (`source='eod'`) entra na curva."""
+    if not _table_exists(conn, "nav_history"):
+        return []
+    return _rows(
+        conn,
+        """
+        SELECT date, equity, cash, long_market_value, gross_exposure,
+               net_exposure, regime, bench_spy, bench_6040, source
+        FROM nav_history
+        WHERE source = 'eod'
+        ORDER BY date ASC, id ASC
+        """,
+    )
+
+
+def _nav_curve(nav_rows: list[dict]) -> list[dict]:
+    """Curva de equity vs benchmark p/ o grafico do dashboard.
+
+    Normaliza estrategia, SPY e 60/40 para base 100 no 1o dia de NAV, para a
+    comparacao visual ser de RETORNO (e nao de niveis incomparaveis: equity em
+    USD vs preco de SPY vs cota do 60/40). Cada ponto: {t, equity, strat, spy, sf}.
+    """
+    if not nav_rows:
+        return []
+
+    def _base(rows: list[dict], key: str) -> float | None:
+        for r in rows:
+            v = _to_float(r.get(key))
+            if v is not None and v > 0:
+                return v
+        return None
+
+    eq0 = _base(nav_rows, "equity")
+    spy0 = _base(nav_rows, "bench_spy")
+    sf0 = _base(nav_rows, "bench_6040")
+
+    out = []
+    for r in nav_rows:
+        eq = _to_float(r.get("equity"))
+        spy = _to_float(r.get("bench_spy"))
+        sf = _to_float(r.get("bench_6040"))
+        out.append(
+            {
+                "t": r.get("date"),
+                "equity": round(eq, 2) if eq is not None else None,
+                "strat": round(eq / eq0 * 100, 3) if eq is not None and eq0 else None,
+                "spy": round(spy / spy0 * 100, 3) if spy is not None and spy0 else None,
+                "sf": round(sf / sf0 * 100, 3) if sf is not None and sf0 else None,
+                "regime": r.get("regime"),
+            }
+        )
+    return out
+
+
+def _track_record_kpis(nav_rows: list[dict]) -> dict:
+    """KPIs since-inception sobre nav_history, via reporting.track_record (mesma
+    fonte e mesmas formulas do relatorio de texto -> dashboard e relatorio batem).
+
+    Tolerante a serie vazia/curta: devolve dict com chaves nulas. Import tardio
+    para nao acoplar o dashboard a numpy no caminho em que nao ha NAV."""
+    if len(nav_rows) < 2:
+        return {
+            "n_days": len(nav_rows), "since": None, "cagr": None, "vol": None,
+            "sharpe": None, "sortino": None, "max_drawdown": None, "calmar": None,
+            "excess_cagr": None, "beta_vs_spy": None, "pct_positive_months": None,
+        }
+    import numpy as np  # noqa: PLC0415 - tardio de proposito
+
+    from reporting.track_record import NavSeries, compute
+
+    dates = [r["date"] for r in nav_rows]
+    equity = np.array([_to_float(r.get("equity")) or float("nan") for r in nav_rows], dtype=float)
+    spy = np.array([_to_float(r.get("bench_spy")) or float("nan") for r in nav_rows], dtype=float)
+    sf = np.array([_to_float(r.get("bench_6040")) or float("nan") for r in nav_rows], dtype=float)
+    m = compute(NavSeries(dates=dates, equity=equity, bench_spy=spy, bench_6040=sf))
+    return {
+        "n_days": m.n_days,
+        "since": m.start,
+        "end": m.end,
+        "cagr": m.cagr,
+        "vol": m.vol_annual,
+        "sharpe": round(m.sharpe, 3),
+        "sortino": round(m.sortino, 3),
+        "max_drawdown": m.max_drawdown,
+        "calmar": round(m.calmar, 3) if m.calmar not in (float("inf"),) else None,
+        "excess_cagr": m.excess_cagr,
+        "beta_vs_spy": round(m.beta_vs_spy, 3) if m.beta_vs_spy is not None else None,
+        "pct_positive_months": m.pct_positive_months,
+    }
+
+
 def _top_trades(closed: list[dict], n: int = 5) -> dict:
     """Maiores ganhos e maiores perdas (principais trades)."""
     ranked = [d for d in closed if d["realized_pnl"] is not None]
@@ -289,6 +383,7 @@ def build_dashboard_data(
             "kpis": {}, "positions": [], "open_orders": [], "recent_trades": [],
             "open_decisions": [], "top_trades": {"winners": [], "losers": []},
             "pnl_curve": [], "by_strategy": [], "by_regime": [], "audit": [],
+            "nav_curve": [], "track_record": {},
         }
 
     conn = _connect_ro(path)
@@ -300,8 +395,12 @@ def build_dashboard_data(
         open_decisions = _open_decisions(conn)
         open_orders = _open_orders(conn)
         audit = _recent_audit(conn)
+        nav_rows = _nav_rows(conn)
     finally:
         conn.close()
+
+    nav_curve = _nav_curve(nav_rows)
+    track_record = _track_record_kpis(nav_rows)
 
     # Posicoes: prefere a visao ao vivo da corretora (tem preco/PnL nao realizado);
     # cai para o snapshot local quando o broker esta off.
@@ -333,4 +432,7 @@ def build_dashboard_data(
         "by_strategy": _group_breakdown(closed, "strategy"),
         "by_regime": _group_breakdown(closed, "regime"),
         "audit": audit,
+        # Track record (Fase 1): curva de equity vs benchmark + KPIs since-inception.
+        "nav_curve": nav_curve,
+        "track_record": track_record,
     }

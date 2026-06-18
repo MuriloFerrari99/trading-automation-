@@ -186,6 +186,17 @@ class OptionOrderIntent(BaseModel):
         return self
 
 
+
+def is_crypto_symbol(symbol: str) -> bool:
+    """Cripto na Alpaca usa par com barra (ex.: 'BTC/USD'); acoes/ETFs nao tem '/'.
+
+    Unica fonte de verdade para discriminar o venue de dados (stock vs crypto) e
+    o pool de poder de compra (marginavel vs nao-marginavel). Duplicado antes em
+    broker/alpaca_broker.py e agents/executor.py — centralizado aqui para evitar
+    dessincronizacao silenciosa entre os dois gates."""
+    return "/" in symbol
+
+
 class OrderResult(BaseModel):
     """Resultado da submissao de uma ordem na corretora."""
 

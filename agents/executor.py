@@ -19,7 +19,7 @@ import time
 
 from broker.base import BrokerClient
 from core.kill_switch import KillSwitch
-from core.models import OptionOrderIntent, OrderIntent, OrderResult, OrderSide
+from core.models import OptionOrderIntent, OrderIntent, OrderResult, OrderSide, is_crypto_symbol
 from data.audit_log import EXECUTOR, AuditLog
 from data.order_repo import (
     FILLED,
@@ -222,7 +222,21 @@ class Executor:
             price = intent.limit_price or self._safe_last_price(intent.symbol)
             if price is not None:
                 estimated_cost = intent.qty * price
-                if estimated_cost > account.buying_power:
+                # DOIS POOLS (semantica REAL da Alpaca): CRIPTO e cash-only (1x) e
+                # so pode ser financiada pelo pool NAO-MARGINAVEL (caixa); ACAO/ETF
+                # usa o pool MARGINAVEL (buying_power). Antes o Executor checava TUDO
+                # contra o pool marginavel — entao nao conseguia barrar a cripto cedo
+                # (a Alpaca a rejeitava server-side) e a paridade quebrava silenciosa.
+                # Agora a cripto e validada contra o caixa: o pre-trade barra a sobra
+                # ANTES da rede, em vez de descobrir na rejeicao da corretora.
+                if is_crypto_symbol(intent.symbol):
+                    available = account.non_marginable_buying_power
+                    if estimated_cost > available:
+                        raise OrderValidationError(
+                            f"caixa nao-marginavel insuficiente p/ cripto: "
+                            f"custo~{estimated_cost} > {available} (cash-only 1x)"
+                        )
+                elif estimated_cost > account.buying_power:
                     raise OrderValidationError(
                         f"buying power insuficiente: custo~{estimated_cost} > "
                         f"{account.buying_power}"

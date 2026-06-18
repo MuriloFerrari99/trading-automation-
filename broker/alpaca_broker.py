@@ -10,6 +10,7 @@ from __future__ import annotations
 from decimal import Decimal
 
 from broker.base import AccountInfo, BrokerClient, BrokerOrder, MarketClockInfo
+from core.models import is_crypto_symbol
 from config.settings import Settings
 from core.models import (
     OptionContract,
@@ -26,6 +27,22 @@ from core.models import (
 
 def _to_decimal(value) -> Decimal:
     return Decimal(str(value)) if value is not None else Decimal(0)
+
+
+def _normalize_crypto_symbol(symbol: str) -> str:
+    """Normaliza um simbolo de cripto SEM barra ('BTCUSD') para a forma 'BASE/USD'.
+
+    A Alpaca pode devolver posicoes de cripto como 'BTCUSD' (sem barra), enquanto
+    o resto do sistema (e o get_positions/ordem) usa 'BTC/USD'. Sem normalizar, o
+    lookup de peso atual no rebalancer ERRA e a posicao e relida como 0 -> compra
+    dobrada (MF-3c). So toca simbolos que TERMINEM em uma quote conhecida e NAO
+    tenham barra; qualquer outra coisa (acoes) passa intacta."""
+    if "/" in symbol:
+        return symbol
+    for quote in ("USDT", "USDC", "USD", "BTC", "ETH"):
+        if symbol.endswith(quote) and len(symbol) > len(quote):
+            return f"{symbol[: -len(quote)]}/{quote}"
+    return symbol
 
 
 class AlpacaBroker(BrokerClient):
@@ -47,16 +64,38 @@ class AlpacaBroker(BrokerClient):
             api_key=settings.alpaca_api_key,
             secret_key=settings.alpaca_secret_key,
         )
+        # Cliente de dados de CRIPTO construido sob demanda (MF-3): mantem o custo
+        # fora do caminho quando nao ha cripto no universo.
+        self._crypto_data = None
+
+    def _crypto_data_client(self):
+        """CryptoHistoricalDataClient lazy (MF-3a/3b). Crypto market data na Alpaca
+        e publico; passamos as chaves por consistencia (sao aceitas)."""
+        if self._crypto_data is None:
+            from alpaca.data.historical import CryptoHistoricalDataClient
+
+            self._crypto_data = CryptoHistoricalDataClient(
+                api_key=self._settings.alpaca_api_key,
+                secret_key=self._settings.alpaca_secret_key,
+            )
+        return self._crypto_data
 
     def get_account(self) -> AccountInfo:
         acct = self._trading.get_account()
         options_level = int(getattr(acct, "options_approved_level", 0) or 0)
+        # Pool NAO-MARGINAVEL (cripto cash-only): a Alpaca expoe o campo
+        # `non_marginable_buying_power` (caixa liquidado contra o qual a cripto e
+        # avaliada). Se o SDK/conta nao trouxer, cai no `cash` (a aproximacao
+        # correta — caixa liquidado). E o que o pre-trade usa p/ barrar cripto.
+        nmbp_raw = getattr(acct, "non_marginable_buying_power", None)
+        nmbp = _to_decimal(nmbp_raw) if nmbp_raw is not None else _to_decimal(acct.cash)
         return AccountInfo(
             cash=_to_decimal(acct.cash),
             buying_power=_to_decimal(acct.buying_power),
             equity=_to_decimal(acct.equity),
             currency=getattr(acct, "currency", "USD"),
             options_level=options_level,
+            non_marginable_buying_power=nmbp,
         )
 
     def get_positions(self) -> list[Position]:
@@ -73,8 +112,13 @@ class AlpacaBroker(BrokerClient):
 
     @staticmethod
     def _to_position(p) -> Position:
+        # MF-3c: a Alpaca pode devolver posicoes de cripto como 'BTCUSD' (sem
+        # barra). Normalizamos para 'BTC/USD' para que o lookup de peso atual no
+        # rebalancer (positions.get('BTC/USD')) ACERTE e nao releia a posicao como
+        # 0 (o que dobraria a compra). Acoes/ETFs passam intactos.
+        symbol = _normalize_crypto_symbol(p.symbol)
         return Position(
-            symbol=p.symbol,
+            symbol=symbol,
             qty=_to_decimal(p.qty),
             avg_entry_price=_to_decimal(p.avg_entry_price),
             current_price=_to_decimal(getattr(p, "current_price", None))
@@ -83,6 +127,16 @@ class AlpacaBroker(BrokerClient):
         )
 
     def get_last_price(self, symbol: str) -> Decimal:
+        # MF-3a: cripto (par com '/') vai pelo feed de cripto; acoes pelo de acoes.
+        # Sem isso, get_stock_latest_trade('BTC/USD') quebra e o ativo de cripto
+        # cai em "sem preco" no rebalancer (nunca negociado) e mismarca o NAV.
+        if is_crypto_symbol(symbol):
+            from alpaca.data.requests import CryptoLatestTradeRequest
+
+            req = CryptoLatestTradeRequest(symbol_or_symbols=symbol)
+            latest = self._crypto_data_client().get_crypto_latest_trade(req)
+            return _to_decimal(latest[symbol].price)
+
         from alpaca.data.requests import StockLatestTradeRequest
 
         req = StockLatestTradeRequest(symbol_or_symbols=symbol.upper())
@@ -94,6 +148,22 @@ class AlpacaBroker(BrokerClient):
     _BARS_PER_DAY = {"1min": 390, "5min": 78, "15min": 26, "1hour": 7, "1day": 1}
 
     def get_bars(self, symbol: str, limit: int = 60, *, timeframe: str = "1Day") -> list[Decimal]:
+        # MF-3b: cripto (par com '/') vai pelo feed de barras de cripto. Mesmo
+        # contrato (closes em ordem cronologica), coerente com a fonte do backtest
+        # (closes diarios). Acoes pelo feed de acoes.
+        if is_crypto_symbol(symbol):
+            from alpaca.data.requests import CryptoBarsRequest
+
+            req = CryptoBarsRequest(
+                symbol_or_symbols=symbol,
+                timeframe=self._timeframe(timeframe),
+                limit=limit,
+                start=self._lookback_start(timeframe, limit),
+            )
+            bars = self._crypto_data_client().get_crypto_bars(req)
+            data = getattr(bars, "data", {}).get(symbol, []) if bars else []
+            return [_to_decimal(b.close) for b in data]
+
         from alpaca.data.requests import StockBarsRequest
 
         symbol = symbol.upper()
@@ -167,7 +237,13 @@ class AlpacaBroker(BrokerClient):
         )
 
         side = ASide.BUY if intent.side == OrderSide.BUY else ASide.SELL
-        tif = ATIF.GTC if intent.time_in_force == TimeInForce.GTC else ATIF.DAY
+        # MF-3d: a Alpaca REJEITA ordens de cripto com TIF=day — cripto exige GTC.
+        # Forcamos GTC quando o simbolo for cripto (par com '/'), independentemente
+        # do TIF do intent (que vem DAY por default). Acoes seguem o intent.
+        if is_crypto_symbol(intent.symbol):
+            tif = ATIF.GTC
+        else:
+            tif = ATIF.GTC if intent.time_in_force == TimeInForce.GTC else ATIF.DAY
         qty = float(intent.qty)
         # client_order_id garante idempotencia: retry com o mesmo id e rejeitado.
         common = dict(

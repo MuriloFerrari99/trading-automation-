@@ -32,6 +32,8 @@ quant-ml = [        # ML-quant: backbone de alphas/modelos, RL e features de ser
     "pyqlib>=0.9",      # microsoft/qlib (nome PyPI: pyqlib)
     "finrl>=0.3",       # AI4Finance/FinRL — reinforcement learning para trading
     "tsfresh>=0.20",    # extracao automatica de features de series temporais
+    "skfolio>=0.20",    # BSD; Combinatorial Purged CV (anti-overfit, substituto vivo do mlfinlab pago)
+    "scikit-learn>=1.4",  # base do skfolio + dos classificadores do spike de CPCV
 ]
 portfolio = [       # otimizacao de carteira e risco
     "Riskfolio-Lib>=6.0",
@@ -41,14 +43,19 @@ ta = [              # analise tecnica / feature engineering
     "pandas-ta-classic>=0.6",  # sucessor vivo do pandas-ta (NAO usar pandas-ta do PyPI: supply-chain)
     "TA-Lib>=0.6.5",           # ja tem wheels pre-compiladas desde 0.6.5
 ]
-research = [        # backtesting vetorizado para sweeps de parametros
+research = [        # backtesting vetorizado para sweeps de parametros + avaliacao de sinal
     "vectorbt>=0.27",
+    "alphalens-reloaded>=0.4",  # IC/quantis/forward-returns: poder preditivo de sinal (alem do QuantStats)
+]
+hft = [             # backtest tick-by-tick com queue position + latencia (microestrutura)
+    "hftbacktest>=2.4",  # MIT; modela fila e latencia — tribunal honesto do micro-edge (System 3)
 ]
 data = [            # fontes/manuseio de dados (Polars + provedores)
     "polars>=1.0",
     "ccxt>=4.0",
     "databento>=0.40",
     "financedatabase>=2.2",
+    "coinmetrics-api-client>=2024.1",  # MIT; on-chain (community tier gratis) — alt-data ortogonal a preco
 ]
 obs = [             # observabilidade dos agentes/reasoner (Langfuse, env-gated)
     "langfuse>=3.0",

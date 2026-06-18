@@ -50,6 +50,14 @@ class Settings(BaseSettings):
     # periodica. "opensquad" exige um OrchestratorBridge concreto (aguardando SDK).
     orchestrator: str = Field("bus", alias="ORCHESTRATOR")
 
+    # Streaming de precos por WebSocket (alpaca-py): alimenta um cache de ultimos
+    # precos para o broker LER do cache em vez de bater REST a cada get_last_price.
+    # Opt-in e best-effort — desligado, o broker opera 100% no REST (comportamento
+    # atual). Ligar com ALPACA_STREAM_ENABLED=true. Feed IEX (gratis no paper).
+    stream_enabled: bool = Field(False, alias="ALPACA_STREAM_ENABLED")
+    stream_feed: str = Field("iex", alias="ALPACA_STREAM_FEED")
+    stream_max_age_seconds: float = Field(5.0, alias="ALPACA_STREAM_MAX_AGE")
+
     @field_validator("alpaca_api_key", "alpaca_secret_key")
     @classmethod
     def _not_blank(cls, v: str) -> str:

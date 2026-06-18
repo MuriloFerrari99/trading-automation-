@@ -68,6 +68,11 @@ class AlpacaBroker(BrokerClient):
         # fora do caminho quando nao ha cripto no universo.
         self._crypto_data = None
 
+        # Streaming de precos por WS (opt-in): alimenta um cache que get_last_price
+        # le antes de bater REST. Best-effort — desligado, tudo segue no REST.
+        self._stream_enabled = bool(getattr(settings, "stream_enabled", False))
+        self._price_stream = None
+
     def _crypto_data_client(self):
         """CryptoHistoricalDataClient lazy (MF-3a/3b). Crypto market data na Alpaca
         e publico; passamos as chaves por consistencia (sao aceitas)."""
@@ -126,7 +131,31 @@ class AlpacaBroker(BrokerClient):
             else None,
         )
 
+    def _price_stream_client(self):
+        """PriceStream lazy (opt-in). None se o streaming estiver desligado."""
+        if not self._stream_enabled:
+            return None
+        if self._price_stream is None:
+            from broker.price_stream import PriceStream
+
+            self._price_stream = PriceStream(
+                self._settings.alpaca_api_key,
+                self._settings.alpaca_secret_key,
+                feed=getattr(self._settings, "stream_feed", "iex"),
+                max_age_seconds=getattr(self._settings, "stream_max_age_seconds", 5.0),
+            )
+        return self._price_stream
+
     def get_last_price(self, symbol: str) -> Decimal:
+        # WS-first: se o streaming estiver ligado e houver preco fresco no cache,
+        # devolve sem bater REST. Senao cai no REST (caminho de seguranca) e inscreve
+        # o simbolo para as proximas leituras virem do cache.
+        stream = self._price_stream_client()
+        if stream is not None:
+            cached = stream.get(symbol)
+            if cached is not None:
+                return cached
+
         # MF-3a: cripto (par com '/') vai pelo feed de cripto; acoes pelo de acoes.
         # Sem isso, get_stock_latest_trade('BTC/USD') quebra e o ativo de cripto
         # cai em "sem preco" no rebalancer (nunca negociado) e mismarca o NAV.
@@ -135,13 +164,17 @@ class AlpacaBroker(BrokerClient):
 
             req = CryptoLatestTradeRequest(symbol_or_symbols=symbol)
             latest = self._crypto_data_client().get_crypto_latest_trade(req)
-            return _to_decimal(latest[symbol].price)
+            price = _to_decimal(latest[symbol].price)
+        else:
+            from alpaca.data.requests import StockLatestTradeRequest
 
-        from alpaca.data.requests import StockLatestTradeRequest
+            req = StockLatestTradeRequest(symbol_or_symbols=symbol.upper())
+            latest = self._data.get_stock_latest_trade(req)
+            price = _to_decimal(latest[symbol.upper()].price)
 
-        req = StockLatestTradeRequest(symbol_or_symbols=symbol.upper())
-        latest = self._data.get_stock_latest_trade(req)
-        return _to_decimal(latest[symbol.upper()].price)
+        if stream is not None:
+            stream.subscribe(symbol)  # proxima leitura deste simbolo vem do cache
+        return price
 
     # Barras de mercado aproximadas por dia de pregao, por timeframe — usado p/
     # calcular uma janela `start` ampla o bastante para devolver `limit` barras.

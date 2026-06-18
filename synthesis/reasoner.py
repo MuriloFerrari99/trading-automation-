@@ -11,8 +11,25 @@ from __future__ import annotations
 
 from typing import Callable, Protocol
 
+from pydantic import BaseModel, Field
+
 from synthesis.observability import observe_generation
+from synthesis.structured import structured_call
 from synthesis.views import Direction, View
+
+
+class NarrativaSintese(BaseModel):
+    """Racional do LLM TIPADO e validado (Pydantic) — auditavel, sem prosa solta.
+
+    `narrativa` e o texto curto consumido a jusante; `drivers`/`conflitos` deixam
+    explicito o porque, e o que o LLM viu de conflitante entre as fontes.
+    """
+
+    narrativa: str = Field(description="Visao de trading em 1-2 frases, objetiva.")
+    drivers: list[str] = Field(default_factory=list, description="Principais drivers da direcao.")
+    conflitos: list[str] = Field(
+        default_factory=list, description="Conflitos/discordancias entre as fontes."
+    )
 
 
 class Reasoner(Protocol):
@@ -94,3 +111,49 @@ class LLMReasoner:
                 symbol, views, direction=direction,
                 conviction=conviction, agreement=agreement,
             )
+
+
+class StructuredLLMReasoner:
+    """Como o LLMReasoner, mas a saida do LLM e TIPADA e VALIDADA (Pydantic).
+
+    Forca JSON -> valida contra NarrativaSintese (narrativa + drivers + conflitos),
+    com reparo e fallback no template (nunca quebra o ciclo). `explain` segue
+    devolvendo a string (narrativa) para o downstream; `explain_structured` expoe
+    o objeto auditavel completo.
+    """
+
+    def __init__(self, call_fn: Callable[[str], str]) -> None:
+        self._call = observe_generation("synthesis.llm_reasoner.structured")(call_fn)
+        self._fallback = TemplateReasoner()
+
+    def explain_structured(
+        self,
+        symbol: str,
+        views: list[View],
+        *,
+        direction: Direction,
+        conviction: float,
+        agreement: float,
+    ) -> NarrativaSintese:
+        prompt = LLMReasoner._prompt(self, symbol, views, direction, conviction, agreement)
+        default = NarrativaSintese(
+            narrativa=self._fallback.explain(
+                symbol, views, direction=direction,
+                conviction=conviction, agreement=agreement,
+            )
+        )
+        return structured_call(self._call, prompt, NarrativaSintese, default=default)
+
+    def explain(
+        self,
+        symbol: str,
+        views: list[View],
+        *,
+        direction: Direction,
+        conviction: float,
+        agreement: float,
+    ) -> str:
+        return self.explain_structured(
+            symbol, views, direction=direction,
+            conviction=conviction, agreement=agreement,
+        ).narrativa.strip()

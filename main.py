@@ -180,7 +180,14 @@ def _build_beta_guard(broker, state, audit):
         peak_equity=peak_equity if peak_equity > 0 else None,
         on_peak_update=lambda p: state.set_decimal(peak_key, p),
     )
-    guard.update(sleeve_nav)  # engaja halt no boot SO se o SLEEVE ja estourou o DD
+    # So engaja o halt no boot com um NAV REALMENTE resolvido (> 0). Um NAV <= 0
+    # significa conta ILEGIVEL (resolve_sleeve_nav engoliu uma falha transitoria
+    # de get_account e devolveu 0) OU conta vazia — em ambos o gate diario fica
+    # INERTE, nao halta. Sem esta guarda, um hiccup do broker no boot dispara
+    # daily_pl=(0-1)/1=-100% e CONGELA o book pela sessao (regressao NOVO-1 pelo
+    # caminho da excecao). O 1o ciclo com NAV real engaja o guard normalmente.
+    if sleeve_nav > 0:
+        guard.update(sleeve_nav)
     audit.write(
         "system", "beta_guard_init",
         payload={
@@ -221,7 +228,12 @@ class _BetaRebalanceOrchestrator(AgentOrchestrator):
             # (isola o sleeve do book de acoes). Em conta flat o NAV e positivo
             # (sem halt fantasma).
             if self._guard is not None:
-                self._guard.update(resolve_sleeve_nav(self._broker))
+                # Mesma defesa do boot: NAV <= 0 = leitura transitoria falha (ou
+                # conta vazia); NAO alimenta o guard, senao daily_pl=-100% halta o
+                # book num hiccup do broker no meio da sessao.
+                _nav = resolve_sleeve_nav(self._broker)
+                if _nav > 0:
+                    self._guard.update(_nav)
             run_beta_rebalance_cycle(
                 self._broker, self._executor, state=self._state, guard=self._guard
             )

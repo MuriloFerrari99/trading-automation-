@@ -11,6 +11,7 @@ Roda em intervalos (5-15 min) APENAS durante o pregao. A cada tick:
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 
 from core.market_clock import MarketClock
 from orchestration.base import AgentOrchestrator, CycleResult
@@ -26,6 +27,7 @@ class Monitor:
         *,
         interval_minutes: int = 10,
         run_when_closed: bool = False,
+        on_schedule_start: Callable[[object], None] | None = None,
     ) -> None:
         self._orchestrator = orchestrator
         self._clock = clock
@@ -33,6 +35,11 @@ class Monitor:
         # 24/7: quando ha ativos de cripto na watchlist, o ciclo roda mesmo com o
         # pregao de acoes fechado (as estrategias gateiam os ativos de acao).
         self._run_when_closed = run_when_closed
+        # Hook ADITIVO e OPCIONAL: chamado uma vez com o scheduler ja criado,
+        # antes do start(). Permite a um caller (main.py) agendar jobs extras
+        # (ex.: captura EOD do beta) SEM acoplar o Monitor a essas dependencias.
+        # Default None => comportamento legado inalterado.
+        self._on_schedule_start = on_schedule_start
 
     def tick(self) -> CycleResult | None:
         """Executa um ciclo se o mercado estiver aberto (ou 24/7 p/ cripto)."""
@@ -64,6 +71,12 @@ class Monitor:
         add_interval_job(
             scheduler, self.tick, minutes=self._interval_minutes, job_id="monitor"
         )
+        # Jobs extras opcionais (aditivo). Best-effort: nunca derruba o Monitor.
+        if self._on_schedule_start is not None:
+            try:
+                self._on_schedule_start(scheduler)
+            except Exception:  # noqa: BLE001 - hook aditivo nao deve quebrar o loop
+                logger.exception("Hook on_schedule_start falhou (ignorado).")
         logger.info(
             "Monitor agendado a cada %d min (UTC). Aguardando pregao...",
             self._interval_minutes,

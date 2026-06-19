@@ -31,6 +31,15 @@ logs/
 
 # Simulacao (cache de dados e relatorios gerados)
 data/cache/
+# System 3 (microestrutura): cache de aggTrades cru (~600MB); o report fica versionado
+data/microstructure_cache/
+# Caches de dados brutos do programa de validacao (pesados; os verdicts .txt
+# e os scripts de simulacao ficam VERSIONADOS — so o cache cru e ignorado).
+data/*_cache/
+data/binance_1m/
+data/binance_book/
+data/binance_carry/
+data/fimathe_videos/
 data/sim_report.txt
 data/experiment_report.txt
 data/experiment_oos_report.txt

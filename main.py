@@ -108,6 +108,128 @@ def _build_risk_manager(broker, state, audit, *, sizer=None) -> RiskManager:
     return RiskManager(rs, guard, sizer=sizer)
 
 
+def _build_beta_guard(broker, state, audit):
+    """PortfolioRiskGuard calibrado ao perfil de BETA (ancorado no beta_v2).
+
+    ADITIVO: separado do guard das estrategias de acoes (_build_risk_manager).
+
+    MF-4 + NOVO-1: o envelope de risco do beta e ISOLADO do das acoes. Tem chaves
+    de estado PROPRIAS ('beta:risk_*') e mede DD/perda-diaria sobre o NAV do
+    SLEEVE do beta = CAPITAL ALOCADO (caixa) + P&L das posicoes do beta — NAO
+    sobre o market value das posicoes (que e 0 no boot da conta flat, o estado de
+    go-live) e NAO sobre o equity TOTAL da conta.
+
+    POR QUE (NOVO-1, regressao do fix do MF-4): antes a base era o mv das posicoes
+    (beta_sleeve_equity). Em conta flat isso e 0; o codigo coagia start=1 e chamava
+    update(0) => daily_pl=(0-1)/1=-100% => HALT fantasma e pegajoso => a 1a
+    rebalanceada bloqueava tudo e o book nunca era construido. Agora a base e o NAV
+    do sleeve: no boot flat, NAV = capital alocado (positivo) => guard sadio/inerte
+    (daily_pl=0), e a 1a rebalanceada GERA ordens. O halt so engaja apos perdas
+    REAIS do sleeve alem do limite. O start/peak por dia/high-water sobrevivem a
+    restart."""
+    from datetime import datetime, timezone
+    from decimal import Decimal
+
+    from config.risk import get_beta_guard_settings
+    from strategies.beta_rebalancer import resolve_sleeve_nav
+
+    bs = get_beta_guard_settings()
+    # NOVO-3: NAV do sleeve numa SO primitiva (sem double-count). Em paper so-beta
+    # (default) e o equity da conta direto (P&L contado UMA vez); com capital
+    # absoluto e caixa_fixo + P&L. No boot flat o NAV e POSITIVO -> guard sadio.
+    sleeve_nav = resolve_sleeve_nav(broker, settings=bs)  # NAV DO BETA, nao da conta
+    today = datetime.now(timezone.utc).date().isoformat()
+
+    # Chaves PROPRIAS do beta (isolam o envelope do guard das acoes).
+    start_key = f"beta:risk_start_equity:{today}"
+    peak_key = "beta:risk_peak_equity"
+
+    # start_equity = NAV do sleeve no inicio do dia (persistido). No boot flat,
+    # NAV = equity da conta / capital absoluto (positivo) -> guard NASCE sadio.
+    #
+    # NOVO-4 (saneamento): um valor persistido <= 0 e LIXO (residuo da versao
+    # buggada do NOVO-1, que gravava 0). Coagir esse 0 p/ start=1 NEUTRALIZA o gate
+    # de perda diaria do dia (denominador 1). Em vez disso, RE-DERIVAMOS do NAV do
+    # boot e LIMPAMOS a chave stale (re-grava o NAV correto). So tratamos None como
+    # "primeiro boot do dia" (grava o NAV); <= 0 e tratado como ausente.
+    start_equity = state.get_decimal(start_key)
+    if start_equity is None or start_equity <= 0:
+        if start_equity is not None and start_equity <= 0:
+            logger.warning(
+                "beta_guard: start_equity persistido invalido (%s) p/ %s; "
+                "re-derivando do NAV do boot (%s) e limpando a chave stale.",
+                start_equity, start_key, sleeve_nav,
+            )
+        state.set_decimal(start_key, sleeve_nav)
+        start_equity = sleeve_nav
+
+    stored_peak = state.get_decimal(peak_key)
+    peak_equity = max(stored_peak or Decimal("0"), start_equity, sleeve_nav)
+    state.set_decimal(peak_key, peak_equity)
+
+    guard = PortfolioRiskGuard(
+        # NAV do sleeve e POSITIVO no boot (equity da conta / capital absoluto),
+        # e start_equity foi re-derivado se vinha <= 0 (NOVO-4). Mantemos o
+        # fallback p/ 1 SO p/ o caso degenerado de NAV de boot 0 (conta sem caixa
+        # nem posicoes) — onde o gate diario fica inerte por nao haver capital.
+        start_equity=start_equity if start_equity > 0 else Decimal("1"),
+        daily_loss_pct=bs.daily_loss_limit_pct,
+        max_dd_pct=bs.max_drawdown_pct,
+        max_per_symbol_pct=bs.max_per_symbol_pct,
+        max_heat_pct=bs.max_portfolio_heat_pct,
+        peak_equity=peak_equity if peak_equity > 0 else None,
+        on_peak_update=lambda p: state.set_decimal(peak_key, p),
+    )
+    guard.update(sleeve_nav)  # engaja halt no boot SO se o SLEEVE ja estourou o DD
+    audit.write(
+        "system", "beta_guard_init",
+        payload={
+            "max_dd": str(bs.max_drawdown_pct),
+            "sleeve_nav": str(sleeve_nav),
+            "start_equity": str(start_equity),
+            "halt": guard.trading_halted,
+        },
+    )
+    return guard
+
+
+class _BetaRebalanceOrchestrator(AgentOrchestrator):
+    """Wrapper ADITIVO: delega o ciclo ao orquestrador base e, em seguida, roda o
+    rebalance mensal do beta (no-op quando nao e devido / flag off).
+
+    Mantem o contrato AgentOrchestrator intacto — para o Monitor e so um
+    orquestrador. NAO altera o pipeline de acoes existente; apenas adiciona um
+    passo que so age uma vez por mes e so quando a flag esta ligada."""
+
+    def __init__(self, inner, broker, executor, *, state=None, guard=None) -> None:
+        self._inner = inner
+        self._broker = broker
+        self._executor = executor
+        self._state = state
+        self._guard = guard
+
+    def run_cycle(self):
+        result = self._inner.run_cycle()
+        try:
+            from strategies.beta_live import run_beta_rebalance_cycle
+            from strategies.beta_rebalancer import resolve_sleeve_nav
+
+            # MF-4 + NOVO-1 + NOVO-3: atualiza o DD-halt do beta com o NAV do
+            # SLEEVE. Em paper SO-BETA (default) o NAV E o equity da conta (P&L
+            # contado UMA vez) — sem o double-count do NOVO-3, entao o guard ve o
+            # drawdown REAL (1x). Com capital absoluto, NAV = caixa_fixo + P&L
+            # (isola o sleeve do book de acoes). Em conta flat o NAV e positivo
+            # (sem halt fantasma).
+            if self._guard is not None:
+                self._guard.update(resolve_sleeve_nav(self._broker))
+            run_beta_rebalance_cycle(
+                self._broker, self._executor, state=self._state, guard=self._guard
+            )
+        except Exception:  # noqa: BLE001 - rebalance aditivo nao derruba o ciclo base
+            logger.exception("Ciclo de rebalance de beta falhou (ignorado).")
+        return result
+
+
 def build_app(
     broker: BrokerClient, orchestrator_name: str = "local"
 ) -> tuple[Monitor, AgentOrchestrator]:
@@ -161,11 +283,33 @@ def build_app(
     # Camada de risco: circuit breakers + sizing. start_equity do dia persistido.
     risk_manager = _build_risk_manager(broker, state, audit, sizer=sizer)
 
+    # MF-1: quando o book de beta esta vivo, o universo do beta e GERIDO pelo
+    # rebalanceador (vol-target/rebalance, SEM stop por ativo). O TrailingStop do
+    # pipeline-base protege TODO long do broker — INCLUSIVE o book do beta — e o
+    # liquidaria numa queda de 10%, corrompendo a tese e o track record. Isentamos
+    # esses simbolos (na FORMA DO BROKER, ex.: 'BTC/USD') do trailing. Com a flag
+    # off, o set fica vazio e o comportamento e o legado.
+    beta_excluded_symbols: set[str] = set()
+    try:
+        from strategies.beta_live import beta_live_enabled as _beta_on
+
+        if _beta_on():
+            from strategies.beta_rebalancer import UNIVERSE as _BETA_UNIVERSE
+            from strategies.beta_rebalancer import to_broker_symbol as _to_broker
+
+            beta_excluded_symbols = {_to_broker(a.ticker) for a in _BETA_UNIVERSE}
+    except Exception:  # noqa: BLE001 - resolucao do universo do beta nunca quebra o boot
+        logger.exception("Falha ao resolver universo do beta p/ isentar trailing (ignorado).")
+
     # WheelStrategy so age em ativos com `wheel` na watchlist E se o gate de
     # elegibilidade (nivel de opcoes + liquidez) passar em runtime.
-    # TrailingStop protege TODO long sem protecao (default da config de risco).
+    # TrailingStop protege TODO long sem protecao (default da config de risco),
+    # EXCETO os simbolos do book de beta (MF-1).
     strategies = [
-        TrailingStopStrategy(get_risk_settings().default_trailing_stop_pct),
+        TrailingStopStrategy(
+            get_risk_settings().default_trailing_stop_pct,
+            excluded_symbols=beta_excluded_symbols,
+        ),
         LadderBuysStrategy(),
         WheelStrategy(),
     ]
@@ -210,13 +354,51 @@ def build_app(
     )
 
     clock = MarketClock(broker)
+
+    # --- Plug ADITIVO da estrategia de beta, atras de FLAG (desligada por padrao).
+    # Enquanto BETA_LIVE_ENABLED estiver off, NADA disto roda: sem rebalance, sem
+    # captura, sem efeito no sistema Alpaca existente. Ver strategies/beta_live.py.
+    on_schedule_start = None
+    beta_orchestrator = orchestrator
+    try:
+        from strategies.beta_live import (
+            beta_live_enabled,
+            schedule_eod_capture,
+            schedule_panel_refresh,
+        )
+
+        if beta_live_enabled():
+            beta_guard = _build_beta_guard(broker, state, audit)
+            # (a) Rebalance mensal: roda no tick do Monitor (no-op quando nao e
+            #     devido), executando as ordens de diferenca pelo Executor.
+            beta_orchestrator = _BetaRebalanceOrchestrator(
+                orchestrator, broker, executor, state=state, guard=beta_guard
+            )
+
+            # (b) Jobs agendados quando o Monitor inicia (ambos atras da flag):
+            #     - captura EOD pos-fechamento (snapshot de NAV);
+            #     - NOVO-2: refresh diario do painel de precos (pre-mercado), p/ o
+            #       asof avancar e o gatilho mensal nao congelar no cache velho.
+            def _on_start(sched):
+                schedule_eod_capture(sched, broker, db_conn=db.conn, state=state)
+                schedule_panel_refresh(sched)
+
+            on_schedule_start = _on_start
+            logger.info(
+                "BETA LIVE ATIVO (flag BETA_LIVE_ENABLED): rebalance mensal + captura EOD "
+                "+ refresh diario de painel ligados."
+            )
+    except Exception:  # noqa: BLE001 - plug aditivo nunca quebra o boot do sistema base
+        logger.exception("Falha ao montar o plug de beta (ignorado); sistema base segue.")
+
     monitor = Monitor(
-        orchestrator,
+        beta_orchestrator,
         clock,
         interval_minutes=MONITOR_INTERVAL_MINUTES,
         run_when_closed=watchlist.has_crypto(),  # cripto opera 24/7
+        on_schedule_start=on_schedule_start,
     )
-    return monitor, orchestrator
+    return monitor, beta_orchestrator
 
 
 def main(argv: list[str] | None = None) -> int:

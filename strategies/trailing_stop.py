@@ -30,10 +30,22 @@ logger = logging.getLogger("strategy.trailing_stop")
 class TrailingStopStrategy(Strategy):
     name = "trailing_stop"
 
-    def __init__(self, default_trailing_stop_pct: Decimal | None = None) -> None:
+    def __init__(
+        self,
+        default_trailing_stop_pct: Decimal | None = None,
+        *,
+        excluded_symbols: set[str] | None = None,
+    ) -> None:
         # Trailing padrao para QUALQUER long sem config propria. None mantem o
         # comportamento legado (so protege itens com trailing_stop_pct).
         self._default_pct = default_trailing_stop_pct
+        # Simbolos geridos por OUTRO book (ex.: o rebalanceador de beta) que NAO
+        # devem receber trailing stop deste pipeline-base. A tese do beta e
+        # vol-target/rebalance SEM stop por ativo — um trailing aqui liquidaria
+        # o book numa queda de 10% e corromperia o track record (MF-1). Os
+        # simbolos vem NA FORMA DO BROKER (ex.: 'BTC/USD'), que e como
+        # get_positions os devolve. Set vazio => comportamento legado (flag off).
+        self._excluded = {s.upper() for s in (excluded_symbols or set())}
 
     def evaluate(self, ctx: StrategyContext) -> list[OrderIntent]:
         intents: list[OrderIntent] = []
@@ -45,6 +57,13 @@ class TrailingStopStrategy(Strategy):
         # posicoes orfas (ex: herdadas de um reconcile) tambem ganham stop.
         for position in self._open_longs(ctx):
             symbol = position.symbol
+
+            # MF-1: posicoes de OUTRO book (beta) NUNCA recebem trailing stop
+            # deste pipeline. Pula ANTES de qualquer logica (inclusive do ramo
+            # cripto 24/7, que dispararia ate com o pregao fechado).
+            if symbol.upper() in self._excluded:
+                continue
+
             item = ctx.watchlist.get(symbol)
 
             asset_class = item.asset_class if item is not None else "equity"

@@ -36,8 +36,28 @@ class FakeBroker(BrokerClient):
         today: date | None = None,
         partial_fill_ratio: Decimal | float | None = None,
         fail_after_record: bool = False,
+        buying_power: Decimal | float | None = None,
+        margin_semantics: bool = False,
     ) -> None:
         self._cash = cash
+        # buying_power explicito (modela conta de MARGEM, em que o poder de compra
+        # excede o caixa). None => legado: buying_power = cash (conta a vista).
+        self._buying_power = (
+            Decimal(str(buying_power)) if buying_power is not None else None
+        )
+        # SEMANTICA DE MARGEM REAL (dois pools), opt-in p/ os testes do leg de
+        # cripto. Quando ligada, o fake modela a Alpaca fielmente:
+        #   - acoes/ETFs (marginaveis): consomem o pool MARGINAVEL (buying_power);
+        #     o caixa cai pelo NOTIONAL CHEIO (colateral), mas o BP cai so pelo
+        #     notional (margem 1x p/ simplificar — o que importa e que o caixa
+        #     some quando o book de acoes deploya);
+        #   - cripto (cash-only, 1x): avaliada contra o CAIXA NAO-MARGINAVEL. Se o
+        #     notional > caixa disponivel, a Alpaca REJEITA server-side -> aqui o
+        #     submit LEVANTA (modela "insufficient non-marginable buying power").
+        # Desligada (default): comportamento legado de pool unico (testes antigos).
+        self._margin_semantics = margin_semantics
+        # Pool marginavel vivo (decrementa a cada fill de acao quando margin_semantics).
+        self._margin_bp = self._buying_power if self._buying_power is not None else cash
         self._prices: dict[str, Decimal] = dict(prices or {})
         self._positions: dict[str, Position] = {}
         self._bars: dict[str, list[Decimal]] = {}
@@ -90,11 +110,21 @@ class FakeBroker(BrokerClient):
             (p.qty * self._prices.get(p.symbol, p.avg_entry_price) for p in self._positions.values()),
             Decimal(0),
         )
+        # Pool marginavel: em margin_semantics e o BP vivo (ja decrementado pelos
+        # fills de acao); senao o buying_power estatico (ou o caixa, legado).
+        if self._margin_semantics:
+            buying_power = self._margin_bp
+        else:
+            buying_power = self._buying_power if self._buying_power is not None else self._cash
+        # Pool NAO-MARGINAVEL (cripto cash-only) = caixa liquidado disponivel.
+        # Nunca negativo (a Alpaca nao da buying power de cripto sobre caixa devedor).
+        nmbp = self._cash if self._cash > 0 else Decimal(0)
         return AccountInfo(
             cash=self._cash,
-            buying_power=self._cash,
+            buying_power=buying_power,
             equity=equity,
             options_level=self._options_level,
+            non_marginable_buying_power=nmbp,
         )
 
     def get_positions(self) -> list[Position]:
@@ -165,6 +195,13 @@ class FakeBroker(BrokerClient):
             return self._as_result(order)
 
         fill_price = self._prices.get(intent.symbol, intent.limit_price or Decimal("1"))
+
+        # SEMANTICA DE MARGEM REAL (dois pools), so quando ligada. A ordem JA foi
+        # registrada no broker (self.submitted) — modelamos a REJEICAO SERVER-SIDE
+        # da Alpaca levantando aqui (igual ao que o Coder reproduziu: a ordem chega
+        # ao broker e e rejeitada, nao barrada no gate do cliente).
+        if self._margin_semantics and intent.side == OrderSide.BUY:
+            self._enforce_two_pools(intent, fill_price)
 
         # Timeout pos-registro: o broker JA conhece a ordem (idempotencia futura
         # a reencontra), mas o cliente recebe uma excecao em vez da resposta.
@@ -237,6 +274,36 @@ class FakeBroker(BrokerClient):
         if order.client_order_id:
             self._orders_by_cid[order.client_order_id] = order
 
+    @staticmethod
+    def _is_crypto(symbol: str) -> bool:
+        """Cripto na Alpaca = par com barra ('BTC/USD'). Acoes/ETFs nao tem '/'."""
+        return "/" in symbol
+
+    def _enforce_two_pools(self, intent: OrderIntent, fill_price: Decimal) -> None:
+        """Modela a checagem de pool REAL da Alpaca p/ uma COMPRA (margin_semantics).
+
+        - CRIPTO (cash-only, 1x): avaliada contra o CAIXA NAO-MARGINAVEL. Se o
+          notional > caixa disponivel, a Alpaca REJEITA server-side. Aqui levanta
+          (= o leg de cripto que o Coder viu cair). Este e o gate que o fix deve
+          PASSAR ao reservar caixa p/ a cripto ANTES das acoes.
+        - ACAO/ETF (marginavel): avaliada contra o pool MARGINAVEL (buying_power).
+          O fill decrementa o pool marginavel (em _apply_fill); o caixa cai pelo
+          notional cheio (colateral), podendo ficar negativo (emprestado)."""
+        notional = intent.qty * fill_price
+        if self._is_crypto(intent.symbol):
+            available = self._cash if self._cash > 0 else Decimal(0)
+            if notional > available:
+                raise RuntimeError(
+                    f"insufficient non-marginable buying power: cripto {intent.symbol} "
+                    f"custo~{notional} > caixa {available} (cash-only 1x)"
+                )
+        else:
+            if notional > self._margin_bp:
+                raise RuntimeError(
+                    f"insufficient buying power: {intent.symbol} custo~{notional} > "
+                    f"buying_power {self._margin_bp}"
+                )
+
     def _apply_fill(self, intent: OrderIntent, fill_price: Decimal) -> None:
         symbol = intent.symbol
         signed = intent.qty if intent.side == OrderSide.BUY else -intent.qty
@@ -253,6 +320,11 @@ class FakeBroker(BrokerClient):
                 avg = existing.avg_entry_price
         cash_delta = -signed * fill_price
         self._cash += cash_delta
+        # SEMANTICA DE MARGEM REAL: uma COMPRA de acao/ETF (marginavel) consome o
+        # pool marginavel; uma VENDA o devolve. Cripto NAO toca o pool marginavel
+        # (cash-only — ja foi debitada do caixa via cash_delta acima).
+        if self._margin_semantics and not self._is_crypto(symbol):
+            self._margin_bp -= signed * fill_price
         if new_qty == 0:
             self._positions.pop(symbol, None)
         else:

@@ -52,7 +52,19 @@ class BrokerOrder:
 
 
 class AccountInfo:
-    """Resumo minimo da conta usado pela logica de negocio."""
+    """Resumo minimo da conta usado pela logica de negocio.
+
+    DOIS POOLS DE PODER DE COMPRA (semantica REAL da Alpaca):
+      - `buying_power`: pool MARGINAVEL (acoes/ETFs). Numa conta de margem Reg-T
+        e ~2x o equity (overnight). Cripto NAO consome este pool.
+      - `non_marginable_buying_power`: pool NAO-MARGINAVEL (cash-only) contra o
+        qual a Alpaca avalia ordens de CRIPTO. E o CAIXA liquidado disponivel —
+        cripto e 1x, sem margem. As acoes tomam margem mas tambem CONSOMEM esse
+        caixa como colateral, entao a cripto precisa do caixa reservado ANTES.
+    Separar os dois e o que permite ao pre-trade validar a cripto contra o pool
+    CERTO (caixa), em vez de contra o pool marginavel (que mostra espaco que a
+    cripto nao pode usar) — a causa-raiz do leg de cripto rejeitado a 2.0x.
+    """
 
     def __init__(
         self,
@@ -62,6 +74,7 @@ class AccountInfo:
         equity: Decimal,
         currency: str = "USD",
         options_level: int = 0,
+        non_marginable_buying_power: Decimal | None = None,
     ) -> None:
         self.cash = cash
         self.buying_power = buying_power
@@ -70,11 +83,20 @@ class AccountInfo:
         # Nivel de aprovacao de opcoes (0 = sem permissao). Usado para gate da
         # Wheel Strategy (Nivel 3) antes de habilita-la.
         self.options_level = options_level
+        # Pool NAO-MARGINAVEL (caixa p/ cripto cash-only). Default = `cash` quando
+        # o broker nao expoe o campo separado (compat.): o caixa liquidado e a
+        # melhor aproximacao do non_marginable_buying_power da Alpaca.
+        self.non_marginable_buying_power = (
+            non_marginable_buying_power
+            if non_marginable_buying_power is not None
+            else cash
+        )
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return (
             f"AccountInfo(cash={self.cash}, buying_power={self.buying_power}, "
-            f"equity={self.equity}, options_level={self.options_level})"
+            f"equity={self.equity}, options_level={self.options_level}, "
+            f"non_marginable_buying_power={self.non_marginable_buying_power})"
         )
 
 

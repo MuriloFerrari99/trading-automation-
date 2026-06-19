@@ -266,6 +266,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
   <div id="err"></div>
   <div class="tabs" id="tabs">
     <div class="tab on" data-v="overview">◎ Visão Geral</div>
+    <div class="tab" data-v="track">▲ Track Record</div>
     <div class="tab" data-v="trades">⇅ Trades & Ordens</div>
     <div class="tab" data-v="audit">◇ Auditoria</div>
   </div>
@@ -302,6 +303,27 @@ INDEX_HTML = r"""<!DOCTYPE html>
         <h3 class="panel-title"><span class="ico"></span>Por Regime</h3><div id="byRegime"></div>
       </div></section>
     </div>
+  </div>
+
+  <!-- TRACK RECORD -->
+  <div class="view" data-view="track">
+    <div class="grid kpis" id="trKpis"></div>
+    <section><div class="card">
+      <h3 class="panel-title"><span class="ico"></span>Curva de Equity vs Benchmark (base 100, since-inception)</h3>
+      <div class="chartwrap"><svg class="chart" id="navChart"></svg><div class="chart-tip" id="navTip"></div></div>
+      <div class="legend">
+        <span><i style="background:var(--cyan)"></i>Estratégia (NAV)</span>
+        <span><i style="background:var(--amber)"></i>SPY (buy&hold)</span>
+        <span><i style="background:var(--violet)"></i>60/40 (SPY/IEF)</span>
+      </div>
+    </div></section>
+    <section><div class="card">
+      <p style="color:var(--dim);font-size:11px;margin:0;line-height:1.6">
+        Rentabilidade passada não representa garantia de resultados futuros. Track record de
+        simulação/paper trading — não houve gestão de recursos de terceiros. Série append-only com
+        cadeia de hash; integridade verificável via <code class="ev">reporting.verify_chain</code>.
+      </p>
+    </div></section>
   </div>
 
   <!-- TRADES -->
@@ -526,6 +548,60 @@ function renderChart(series){
   svg.onmouseleave=()=>{scan.style.opacity=0;hov.style.opacity=0;tip.style.opacity=0;};
 }
 
+/* ---------- track record: KPIs since-inception ---------- */
+function renderTrackKpis(tr){
+  const host=document.getElementById("trKpis"); if(!host) return;
+  if(!tr || !tr.n_days || tr.n_days<2){
+    host.innerHTML=`<div class="empty" style="grid-column:1/-1">A curva de track record aparece quando houver ≥2 snapshots EOD em nav_history.</div>`;
+    return;
+  }
+  const card=(label,val,sub,signed)=>`<div class="card kpi"><div class="label">${label}</div>
+    <div class="value ${signed?cls(typeof val==='number'?val:0):''}">${val}</div><div class="sub">${sub||""}</div></div>`;
+  host.innerHTML=[
+    card("CAGR",fmtPct(tr.cagr),`since ${esc(tr.since||'—')}`,true),
+    card("Sharpe",fmtNum(tr.sharpe),`vol ${fmtPct(tr.vol)} a.a.`),
+    card("Sortino",fmtNum(tr.sortino),`${tr.n_days} dias de NAV`),
+    card("MaxDD",fmtPct(tr.max_drawdown),`Calmar ${fmtNum(tr.calmar)}`,true),
+    card("Excess vs SPY",fmtPct(tr.excess_cagr),`β ${fmtNum(tr.beta_vs_spy)}`,true),
+    card("Meses +",fmtPct(tr.pct_positive_months),"% meses positivos"),
+  ].join("");
+}
+
+/* ---------- track record: curva multi-linha (estratégia vs benchmarks) ---------- */
+function renderNavChart(series){
+  const svg=document.getElementById("navChart"), tip=document.getElementById("navTip");
+  if(!svg) return;
+  const W=svg.clientWidth||600, H=svg.clientHeight||240, pad={l:8,r:8,t:14,b:18};
+  if(!series||series.length<2){
+    svg.innerHTML=`<text x="50%" y="50%" text-anchor="middle" fill="var(--dim)" font-style="italic" font-size="13">A curva aparece quando houver ≥2 snapshots EOD.</text>`;
+    return;
+  }
+  const lines=[{k:"strat",c:"var(--cyan)"},{k:"spy",c:"var(--amber)"},{k:"sf",c:"var(--violet)"}];
+  const vals=[]; series.forEach(p=>lines.forEach(l=>{ if(p[l.k]!=null) vals.push(p[l.k]); }));
+  if(!vals.length){ svg.innerHTML=""; return; }
+  const min=Math.min(...vals), max=Math.max(...vals), span=(max-min)||1;
+  const X=i=>pad.l+(i/(series.length-1))*(W-pad.l-pad.r);
+  const Y=v=>pad.t+(1-(v-min)/span)*(H-pad.t-pad.b);
+  const path=l=>{ let d="",pen=false;
+    series.forEach((p,i)=>{ const v=p[l.k]; if(v==null){pen=false;return;}
+      d+=(pen?"L":"M")+X(i).toFixed(1)+","+Y(v).toFixed(1)+" "; pen=true; }); return d; };
+  const base100=Y(100).toFixed(1);
+  svg.innerHTML=`
+    <line x1="${pad.l}" x2="${W-pad.r}" y1="${base100}" y2="${base100}" stroke="rgba(120,160,255,.18)" stroke-dasharray="4 4"/>
+    ${lines.map(l=>`<path d="${path(l)}" fill="none" stroke="${l.c}" stroke-width="2.2" stroke-linejoin="round"/>`).join("")}
+    <line class="scanline" id="navScan" x1="0" x2="0" y1="${pad.t}" y2="${H-pad.b}"/>`;
+  const scan=svg.querySelector("#navScan");
+  svg.onmousemove=e=>{
+    const r=svg.getBoundingClientRect(); const mx=e.clientX-r.left;
+    let i=Math.round(((mx-pad.l)/(W-pad.l-pad.r))*(series.length-1));
+    i=Math.max(0,Math.min(series.length-1,i)); const p=series[i];
+    scan.setAttribute("x1",X(i));scan.setAttribute("x2",X(i));scan.style.opacity=.6;
+    tip.style.opacity=1;tip.style.left=X(i)+"px";tip.style.top=pad.t+"px";
+    tip.innerHTML=`${tshort(p.t)}<br>estrat <b>${p.strat!=null?p.strat.toFixed(1):'—'}</b> · SPY ${p.spy!=null?p.spy.toFixed(1):'—'} · 60/40 ${p.sf!=null?p.sf.toFixed(1):'—'}`;
+  };
+  svg.onmouseleave=()=>{scan.style.opacity=0;tip.style.opacity=0;};
+}
+
 /* ---------- render mestre (sem refetch) ---------- */
 function render(){
   if(!DATA) return; const d=DATA;
@@ -539,6 +615,8 @@ function render(){
   renderOrders(d.open_orders||[]);
   renderTrades(d.recent_trades||[]);
   renderAudit(d.audit||[]);
+  renderTrackKpis(d.track_record||{});
+  renderNavChart(d.nav_curve||[]);
 }
 
 async function load(){
@@ -559,7 +637,7 @@ document.getElementById("tabs").onclick=e=>{
   const t=e.target.closest(".tab"); if(!t) return;
   document.querySelectorAll(".tab").forEach(x=>x.classList.toggle("on",x===t));
   document.querySelectorAll(".view").forEach(v=>v.classList.toggle("on",v.dataset.view===t.dataset.v));
-  if(t.dataset.v==="overview") render();
+  if(t.dataset.v==="overview"||t.dataset.v==="track") render();
 };
 /* ---------- controles ---------- */
 document.getElementById("refreshBtn").onclick=load;

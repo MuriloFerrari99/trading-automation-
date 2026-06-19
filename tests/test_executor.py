@@ -96,3 +96,70 @@ def test_retry_then_success(broker, trade_logger, kill_switch):
     result = ex.execute(_buy(qty="1"))
     assert isinstance(result, OrderResult)
     assert calls["n"] == 2  # falhou 1x, sucesso na 2a
+
+
+# =========================================================================== #
+# DOIS POOLS DE BUYING POWER (data/code_audit_beta_2x.txt, item 2/D) — o
+# Executor deve validar CRIPTO contra o pool NAO-MARGINAVEL (caixa cash-only),
+# nao contra o pool marginavel. Antes checava TUDO contra buying_power e nao
+# conseguia barrar a cripto cedo (a Alpaca a rejeitava server-side).
+# =========================================================================== #
+def test_crypto_validated_against_non_marginable_pool(trade_logger, kill_switch):
+    """CRIPTO e barrada contra o CAIXA (nao-marginavel), mesmo com pool marginavel
+    (buying_power) abundante. Antes passava no gate (checava buying_power) e a
+    corretora rejeitava server-side."""
+    from broker.fake_broker import FakeBroker
+
+    # buying_power marginavel gigante, mas caixa (pool cripto) so 5k.
+    broker = FakeBroker(
+        cash=Decimal("5000"),
+        prices={"BTC/USD": Decimal("10000")},
+        buying_power=Decimal("400000"),
+    )
+    ex = Executor(broker, trade_logger, kill_switch)
+    # custo da cripto ~10k > caixa 5k (apesar de BP 400k) -> barrada no pre-trade.
+    intent = OrderIntent(symbol="BTC/USD", qty=Decimal("1"), side=OrderSide.BUY, strategy="beta")
+    result = ex.execute(intent)
+    assert result is None, "cripto acima do caixa deveria ser barrada contra o pool nao-marginavel"
+    assert broker.submitted == []
+
+
+def test_crypto_passes_when_cash_covers_it(trade_logger, kill_switch):
+    """CRIPTO passa quando o CAIXA a cobre (mesmo que < buying_power marginavel)."""
+    from broker.fake_broker import FakeBroker
+
+    broker = FakeBroker(
+        cash=Decimal("50000"),
+        prices={"BTC/USD": Decimal("10000")},
+        buying_power=Decimal("400000"),
+    )
+    ex = Executor(broker, trade_logger, kill_switch)
+    intent = OrderIntent(symbol="BTC/USD", qty=Decimal("1"), side=OrderSide.BUY, strategy="beta")
+    result = ex.execute(intent)
+    assert result is not None and result.status == "filled"
+    assert any(i.symbol == "BTC/USD" for i in broker.submitted)
+
+
+def test_stock_still_validated_against_marginable_pool(trade_logger, kill_switch):
+    """ACAO/ETF continua validada contra o pool MARGINAVEL (buying_power), nao o
+    caixa — uma compra de acao acima do caixa mas dentro do BP de margem PASSA
+    (e o caso normal de uma conta de margem a 2.0x)."""
+    from broker.fake_broker import FakeBroker
+
+    # caixa 100k, BP 400k. Compra de 150k de SPY: > caixa, < BP -> passa (margem).
+    broker = FakeBroker(
+        cash=Decimal("100000"),
+        prices={"SPY": Decimal("100")},
+        buying_power=Decimal("400000"),
+    )
+    ex = Executor(broker, trade_logger, kill_switch)
+    intent = OrderIntent(symbol="SPY", qty=Decimal("1500"), side=OrderSide.BUY, strategy="beta")
+    result = ex.execute(intent)
+    assert result is not None and result.status == "filled"
+
+    # mas acima do BP marginavel (500k > 400k) e barrada.
+    broker2 = FakeBroker(cash=Decimal("100000"), prices={"SPY": Decimal("100")}, buying_power=Decimal("400000"))
+    ex2 = Executor(broker2, trade_logger, kill_switch)
+    result2 = ex2.execute(OrderIntent(symbol="SPY", qty=Decimal("5000"), side=OrderSide.BUY, strategy="beta"))
+    assert result2 is None
+    assert broker2.submitted == []

@@ -1,0 +1,106 @@
+================================================================================================
+BETA TREND — um overlay de TREND-FOLLOWING (TSMOM / managed futures) AGREGA valor
+risco-ajustado ao beta de producao, de forma ROBUSTA? Cabeca-a-cabeca vs beta puro.
+================================================================================================
+BARRA HONESTA: GRADUA p/ uma variante SO se ela BATE o beta puro no risco-ajustado
+  (Sharpe E/OU Calmar) liquido de custo, de forma ROBUSTA (em TODOS os lookbacks
+  3/6/12), idealmente melhorando o MaxDD sem matar o retorno. Senao, o beta puro fica.
+
+================================================================================================
+PREMISSAS / HONESTIDADE
+================================================================================================
+  BASE = beta de PRODUCAO (importado, NAO editado): vol-target 1/vol (sem portao),
+  long-only, vol-alvo 10% a.a., lookback vol 60d, teto cripto 5%/nome,
+  alavancado 2.0x com financiamento real.
+  V1 = trend-filter long-only: zera o peso do ativo em DOWNTREND (retorno do lookback < 0),
+  redistribui via re-normalizacao do vol-target; MESMA leverage; SEM shorts.
+  V2 = 50% beta puro + 50% sleeve TSMOM long/short (sinal = sign do retorno do lookback,
+  1/vol, escalado a vol-alvo, PODE SHORTAR); combo re-escalado p/ o MESMO gross do BASE, MESMA leverage.
+  LOOKBACKS PADRAO (NAO otimizados): 3m, 6m, 12m (~63d, 126d, 252d). Headline = 6m.
+  SEM LOOK-AHEAD: sinal de trend de t usa retorno do lookback ate t-1 (.shift(1) herdado);
+  retorno aplicado em t. Custo de transacao real sobre |Delta peso| (inclui o turnover do
+  trend e o virar long->short). Financiamento real sobre o capital emprestado, INCLUSIVE o
+  gross do lado SHORT do TSMOM. Custo equities 3bps/lado, cripto 35bps/lado; financ. 5.5% a.a.
+
+  PAINEL: 8 ativos, 1993-01-29..2026-06-15 (8401 dias). JANELA-CABECA a partir de 2004-11-18 (cesta diversificada).
+  SPY:1993-01-29→2026-06-15(8401)  QQQ:1999-03-10→2026-06-15(6859)  TLT:2002-07-30→2026-06-15(6008)  IEF:2002-07-30→2026-06-15(6008)  GLD:2004-11-18→2026-06-15(5426)  SLV:2006-04-28→2026-06-15(5064)  BTC-USD:2014-09-17→2026-06-15(2953)  ETH-USD:2017-11-09→2026-06-15(2159)
+
+================================================================================================
+(1) TABELA CABECA-A-CABECA — BASE vs V1 vs V2 (lookback headline = 6m)
+================================================================================================
+  estrategia                         |    CAGR | Sharpe | Sortino |   MaxDD | Calmar |       pior ano | gross
+  -----------------------------------------------------------------------------------------------------------
+  BASE: beta puro (2.0x)             |  +10.9% |   0.95 |    1.34 |  -25.9% |   0.42 |   -19.5% (2022) |  149%
+  V1 6m trend-filter                 |  +10.7% |   0.77 |    1.01 |  -26.6% |   0.40 |   -19.3% (2022) |  149%
+  V2 6m TSMOM combo                  |  +12.0% |   0.79 |    1.01 |  -31.8% |   0.38 |   -15.2% (2015) |  148%
+
+================================================================================================
+(2) GANHO ROBUSTO AOS LOOKBACKS? (a barra exige bater o beta puro em TODOS: 3/6/12)
+================================================================================================
+  variante / lookback    |    CAGR | Sharpe |   MaxDD | Calmar | Sh>base? | Cal>base? | DD<base?
+  ----------------------------------------------------------------------------------------------
+  V1 3m vs base          |  +10.8% |   0.76 |  -33.5% |   0.32 |      nao |       nao |      nao
+  V1 6m vs base          |  +10.7% |   0.77 |  -26.6% |   0.40 |      nao |       nao |      nao
+  V1 12m vs base         |  +11.5% |   0.85 |  -29.2% |   0.39 |      nao |       nao |      nao
+  ..............................................................................................
+  V2 3m vs base          |  +12.0% |   0.76 |  -31.3% |   0.38 |      nao |       nao |      nao
+  V2 6m vs base          |  +12.0% |   0.79 |  -31.8% |   0.38 |      nao |       nao |      nao
+  V2 12m vs base         |  +10.6% |   0.75 |  -40.5% |   0.26 |      nao |       nao |      nao
+  ..............................................................................................
+  BASE (beta puro 2.0x)  |  +10.9% |   0.95 |  -25.9% |   0.42 |        — |         — |        —
+
+  ROBUSTO = bate o beta puro (Sharpe E/OU Calmar) em TODOS os lookbacks 3/6/12,
+  com o retorno NAO morto (CAGR >= 70% do base). Senao, o beta puro fica.
+
+================================================================================================
+(3) MELHORA O DRAWDOWN? (MaxDD por lookback + comportamento em crise)
+================================================================================================
+  variante               |        3m |        6m |       12m
+  ------------------------------------------------------------
+  BASE (beta puro 2.0x)  |    -25.9% |    -25.9% |    -25.9%
+  V1 trend-filter        |    -33.5% |    -26.6% |    -29.2%
+  V2 TSMOM combo         |    -31.3% |    -31.8% |    -40.5%
+  (MaxDD; mais perto de 0 = melhor. A tese do trend e melhorar AQUI.)
+
+  estrategia                 |     2008 (GFC) |   2020 (COVID) |    2022 (Bear)
+  -----------------------------------------------------------------------------
+  BASE: beta puro 2.0x       |          -1.6% |          +0.2% |         -19.5%
+  V1 6m trend-filter         |          -2.8% |          -1.2% |         -19.3%
+  V2 6m TSMOM combo          |         -16.7% |          -1.3% |         -12.3%
+
+================================================================================================
+(3b) TRIBUNAL ESTATISTICO (DSR/PBO sobre variantes x lookbacks — anti data-snooping)
+================================================================================================
+  Melhor variante por Sharpe: V1 12m (Sharpe anual 0.85).
+  n_trials (variantes de trend testadas) = 6.
+  DSR (deflacionado por 6 trials) = 1.000  [obstaculo data-snooping Sharpe anual = 0.05].
+  PSR (P[Sharpe verdadeiro > 0]) = 1.000.
+  PBO (prob. de overfitting do processo de selecao) = 0.389  [< 0.50 = aceitavel].
+
+  LEITURA: DSR alto (>=0.95) => o melhor Sharpe das variantes SUPERA o que se
+  esperaria do melhor de N tentativas por acaso (sinal). DSR baixo => o ganho
+  aparente do trend e indistinguivel de sorte de ter testado varias configs.
+  PBO alto (>=0.50) => escolher 'a melhor variante de trend' seleciona sorte.
+
+================================================================================================
+(4) VEREDITO — gradua (qual variante) ou o beta puro fica?
+================================================================================================
+  BASE  (beta puro 2.0x) : CAGR +10.9% | Sharpe 0.95 | MaxDD -25.9% | Calmar 0.42
+  V1 (6m trend-filter) : CAGR +10.7% | Sharpe 0.77 | MaxDD -26.6% | Calmar 0.40
+  V2 (6m TSMOM combo) : CAGR +12.0% | Sharpe 0.79 | MaxDD -31.8% | Calmar 0.38
+
+  Robustez (bate o beta puro em TODOS os lookbacks 3/6/12?): V1=NAO · V2=NAO.
+  Tribunal estatistico: DSR da melhor variante = 1.000 (>=0.95 (sinal)).
+
+  >>> O BETA PURO FICA. Nenhuma variante de trend BATE o beta puro de forma
+      ROBUSTA (em TODOS os lookbacks 3/6/12) no risco-ajustado com retorno vivo,
+      mesmo com DSR ok, a vantagem nao se sustenta em todos os lookbacks (fragil).
+      O overlay de trend-following, nesta cesta multi-ativo ja vol-targeted e
+      alavancada, NAO agrega valor risco-ajustado robusto. NAO vou vender o sonho.
+
+================================================================================================
+(5) ARQUIVOS
+================================================================================================
+  - simulation/beta_trend.py  (este modulo; importa beta_portfolio + beta_v2, nao edita)
+  - data/beta_trend_report.txt  (este relatorio)
+  Se graduar, a variante PRECISA de auditoria do Coder antes de qualquer config viva.

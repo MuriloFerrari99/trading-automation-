@@ -1,0 +1,286 @@
+================================================================================
+AUDITORIA ADVERSARIAL — LIGAR O BETA A 2.0x NO PAPER (PORTAO FINAL, DAY-0 2.0x)
+Auditor: O CODER (independente, read-only; NAO escrevi este codigo).
+Repo: /Users/muriloferrari/Projetos/trading-automation   Data: 2026-06-15.
+Pergunta central: a mudanca 1.5x -> 2.0x (PRODUCTION_LEVERAGE=2.0 + guards
+recalibrados: DD -43% / daily -8% / per-symbol 210% / heat 300%) e SEGURA p/ ligar
+BETA_LIVE_ENABLED no paper AGORA?
+Metodo: NAO confiei na prosa do Executor nem nos 367 testes verdes. REPRODUZI cada
+item com o cache REAL (data/beta_cache, 8 ativos, 8401 barras ate 2026-06-15), os
+construtores de peso REAIS (production_weight_frame), o guard REAL, o Executor REAL
+e a semantica de margem da Alpaca confirmada na documentacao oficial.
+================================================================================
+
+*** VEREDITO: AINDA NAO. ***
+
+Ha 1 BLOQUEADOR OPERACIONAL NOVO, introduzido pela ida a 2.0x, que QUEBRA a
+paridade vivo==backtest no leg de CRIPTO e que NAO existia (ou nao mordia) a 1.5x:
+
+  [BLOQUEADOR] CRIPTO a 2.0x e REJEITADA pela Alpaca quando o book de acoes a 2.0x
+  ja consumiu o buying power / caixa. Cripto na Alpaca e NAO-MARGINAVEL (cash-only,
+  1x), avaliada contra non_marginable_buying_power (CAIXA liquidado). A 2.0x o book
+  fica ~100% investido + ~50-100% TOMADO em margem, entao sobra ~0 de caixa p/ a
+  cripto. O rebalancer, porem, escala a CRIPTO pelos MESMOS 2.0x das acoes e a
+  trata identica a uma acao. Resultado REPRODUZIDO: a ordem de BTC e ACEITA pelo
+  Executor (que checa o pool MARGINAVEL, nao o caixa) e depois REJEITADA pela
+  Alpaca por "insufficient non-marginable buying power". O book vivo fica com 0% de
+  cripto vs ~10% no backtest -> o track record a 2.0x NAO bate com o validado.
+  Acontece em ~28% dos dias com cripto>0 (cripto>0 em 1066 dias; recente: ate
+  2025-12-01). NAO e cosmetico nem corner case.
+
+E ha 1 PRE-CONDICAO OPERACIONAL DURA (nao e bug de codigo, mas e go/no-go):
+
+  [PRE-CONDICAO] A conta paper PRECISA ser conta de MARGEM com 2:1 Reg-T overnight
+  PLENO (buying power = 2x equity, equity >= US$2.000). A 1a rebalanceada a 2.0x
+  manda ~170% do equity HOJE e ate 200% em dias historicos. Isso so CABE se o BP
+  for 2.0x. Reproduzido: com BP < 2.0x (ex.: 1.9x) ordens JA sao rejeitadas. Com
+  conta CASH (1x) metade das ordens cai. Confirme buying_power=2x no boot.
+
+Tudo o mais que o Executor mexeu FUNCIONA e foi reproduzido: os 3 guards (DD/
+daily/per-symbol) estao corretamente recalibrados ao perfil 2.0x (pegam anomalia,
+nunca a operacao normal); a paridade de PESO vivo==backtest e bit-a-bit (0.0) a
+2.0x; NENHUMA regressao em sizing/boot-flat/isolacao-MF-4/timing-r+1/no-look-ahead;
+flag OFF == legado; 367 testes verdes sem skip. O unico item que IMPEDE o day-0
+limpo e o eixo CRIPTO/MARGEM — exatamente o foco maximo do briefing.
+
+--------------------------------------------------------------------------------
+RESUMO POR ITEM (numeros REPRODUZIDOS)
+--------------------------------------------------------------------------------
+  [1 GUARDS]        OK. DD-43%/daily-8%/per-symbol-210% calibrados certo; so pegam
+                    anomalia. Reproduzido contra dados reais do book 2.0x.
+  [2 PARIDADE]      OK bit-a-bit (max|erro|=0.000e+00, 40 pesos/5 datas a 2.0x).
+                    Alavancagem e PARAMETRO; pesos auditados intactos.
+  [3 REGRESSAO]     NENHUMA no nucleo (sizing/boot/MF-4/r+1/look-ahead seguem a 2.0x).
+                    POREM a ida a 2.0x EXPOE o bug latente de cripto (item 4) que a
+                    1.5x nao mordia -> e a "regressao nova" desta rodada, no eixo
+                    operacional (nao no calculo de peso).
+  [4 MARGEM/CRIPTO] *** BLOQUEADOR. *** Cripto a 2.0x rejeitada por falta de caixa
+                    (cash-only) quando acoes consomem o BP. Quebra a paridade no leg
+                    de cripto. + PRE-CONDICAO: exige BP=2x (Reg-T pleno) p/ os 200%.
+  [5 FLAG/SUITE]    OK. Flag OFF == no-op total; 367 passed, 0 skip/xfail (56 no beta).
+
+================================================================================
+PARTE 1 — GUARDS RECALIBRADOS: CORRETOS (reproduzido, nao so lido)
+================================================================================
+ARQUIVOS: config/risk.py:124 (DD -43%), :128 (daily -8%), :136 (per-symbol 210%),
+:142 (heat 300%); risk/portfolio_guard.py:41-83 (update/can_open).
+
+DADO-ANCORA (reproduzido do book 2.0x real, janela-cabeca, run_portfolio_levered):
+  MaxDD backtest = -25.37%   (report: -25.9% no menu completo)
+  pior dia       = -5.69%    (comentario em config/risk.py:97 diz -5.67% -> CONFERE)
+  sigma diario   =  0.865%   vol realizada 13.7% a.a. (nominal/expo-alvo 20%)
+  dias <= -8% no dia = 0     dias <= -6% no dia = 0   (em toda a janela)
+
+(a) DD-HALT -43% — REPRODUZIDO via PortfolioRiskGuard real (peak 100k persiste):
+      DD -25/-30/-36/-39/-42/-43%  -> halted=False
+      DD -44%                       -> HALT "max drawdown atingido (-44.00%)"
+    LEITURA: o DD AO-VIVO esperado do perfil 2.0x e -36%/-39%; o backtest so chega
+    a -25.4%. -43% fica ACIMA do esperado-vivo com folga (NUNCA halta a operacao
+    normal) e ABAIXO do beta cru ao-vivo (-54/-58%) — ainda para num cisne negro
+    pior que o proprio produto. NAO e alto demais a ponto de inutil (para antes do
+    beta cru), NAO e baixo demais a ponto de haltar normal (-39% passa). CORRETO.
+    Confirmo o ponto do briefing: -28% (o valor de 1.5x) HALTARIA na operacao
+    normal de 2.0x (o DD vivo -36% > 28%) — a recalibracao p/ -43% e necessaria.
+
+(b) DAILY-LOSS -8% — REPRODUZIDO:
+      dia -5/-6/-7%  -> halted=False ;  dia -8/-9% -> HALT.
+    O pior dia em toda a historia do book 2.0x foi -5.69%; -8% = ~9.2 sigmas na vol
+    realizada. So pega choque anomalo; nunca um dia tipico/cauda do perfil. CORRETO.
+
+(c) PER-SYMBOL 210% — REPRODUZIDO sobre o painel REAL (production_weight_frame, ja
+    em 2.0x):
+      concentracao MAXIMA por nome na historia inteira = 200.00% (SPY e IEF; o
+      1/vol pondo TODA a alavancagem 2.0x num nome de baixa vol). Dias > 210% = 0.
+    O teto 210% fica ACIMA do maximo legitimo (200%) com ~5% de folga -> so pega
+    anomalia (peso > a propria alavancagem = bug de pre-process) e PRESERVA a
+    paridade. Reproduzido tb que a 1a rebalanceada a 2.0x NAO bloqueia NENHUM leg
+    por per-symbol. CORRETO. (160% de 1.5x clipava ~os dias de 200% -> certo subir.)
+
+(d) HEAT 300% — INERTE p/ o rebalance (compute_plan passa current_heat=0 ao
+    can_open; beta_rebalancer.py:575). 300% > gross max (200%) -> nunca barra.
+    Inofensivo. (Comentario em config/risk.py:140 diz "gross medio ~166%"; o gross
+    medio REAL reproduzido e 150.3% — o comentario SUPERESTIMA, lado conservador.)
+
+STATUS ITEM 1: OK. Os 3 guards ativos batem com os dados da fronteira (2.0x: DD
+backtest -25.9%, vivo -36/-39%, concentracao max 200%). So pegam anomalia.
+
+================================================================================
+PARTE 2 — PARIDADE VIVO==BACKTEST A 2.0x: BIT-A-BIT (reproduzido)
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:269-317 (production_weight_frame /
+target_weights_for_date); simulation/beta_v2.py:218-221 (leverage_weights).
+
+REPRODUCAO: target_weights_for_date(panel, classes, asof, leverage=2.0) vs
+production_weight_frame(panel, classes).loc[asof], em 5 datas (hoje, -30, -200,
+-800, -1500):
+    max|erro| = 0.000e+00  sobre 40 pesos.
+
+A alavancagem e PARAMETRO LIMPO: leverage_weights(base, L) = base * L. O nucleo
+auditado (weights_volt_with_conditional_hedge) NAO muda com L; so o vetor e
+escalado. test_production_leverage_scales_gross confirma gross(2.0x)=2.0*gross(1x)
+e trava PRODUCTION_LEVERAGE==2.0. O peso auditado esta INTACTO. STATUS: OK.
+
+================================================================================
+PARTE 3 — REGRESSAO NOVA da mudanca 1.5x -> 2.0x?
+================================================================================
+No NUCLEO de calculo: NENHUMA. Reproduzido a 2.0x:
+  - sizing: o rebalancer dimensiona por NOTIONAL (peso*equity), nao por risco-ate-
+    stop; a 2.0x so o vetor de pesos cresce; sem caminho de DynamicSizer envolvido
+    (o beta nao usa conviction_sizing). Sem regressao.
+  - boot flat (NOVO-1): NAV de boot = equity da conta (paper so-beta) > 0; guard
+    nasce sadio a 2.0x igual a 1.5x. Sem regressao.
+  - isolacao MF-4: inalterada por L (mede mv das posicoes do universo). Sem regressao.
+  - timing r+1 / no-look-ahead: inalterados por L; paridade bit-a-bit ja prova que
+    perturbar a ultima barra nao muda o asof anterior. Sem regressao.
+
+POReM — a ida a 2.0x EXPOE um bug LATENTE de execucao que a 1.5x nao disparava:
+o leg de CRIPTO (ver Parte 4). A 1.0x/1.5x as acoes deixavam caixa suficiente p/
+a cripto cash-only caber; a 2.0x as acoes consomem o BP/caixa e a cripto e
+rejeitada. E uma REGRESSAO DE COMPORTAMENTO induzida pela alavancagem maior, no
+eixo operacional. Esta e a "nova regressao" desta rodada.
+
+================================================================================
+PARTE 4 — *** O ITEM CRITICO: MARGEM E CRIPTO A 2.0x *** (foco maximo)
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:288 (leverage_weights aplicado a TODO o
+vetor, INCLUSIVE cripto), :537-588 (_plan_symbol — cripto so muda symbol-map +
+fractional + lote; SEM reserva de caixa, SEM tratamento 1x); agents/executor.py:
+217-229 (_validate checa estimated_cost > account.buying_power — pool MARGINAVEL,
+p/ TODA ordem inclusive cripto); broker/base.py:54-72 (AccountInfo NAO tem campo
+non_marginable_buying_power — o broker nem busca o caixa de cripto).
+
+FATO da Alpaca (doc oficial, confirmado):
+  - CRIPTO e NAO-MARGINAVEL: cash-only, 1x, sem short; ordens avaliadas contra
+    non_marginable_buying_power (CAIXA liquidado). Teto de notional por ordem $200k.
+  - Conta de MARGEM Reg-T = 2:1 buying power (overnight) p/ ACOES, default p/ conta
+    >= US$2.000 (paper e live). < US$2.000 -> 1x.
+
+(A) OS NUMEROS REAIS A 2.0x (reproduzidos, conta paper 100k):
+    - HOJE (asof 2026-06-15): alvo IEF 90.4% / SPY 34.7% / QQQ 26.3% / GLD 18.7%;
+      GROSS 170% ; CRIPTO 0% (o vol-target zerou BTC/ETH hoje).
+      -> notional total US$170k = 170% do equity, TUDO acoes/ETF (margem).
+    - GROSS na historia: medio 150.3% | max 200% | p95 200% (NAO "166% medio" —
+      o numero real bate com o report da fronteira: gross med 149%).
+    - CONCENTRACAO max por nome = 200% (cabe sob 210%).
+    - CRIPTO quando >0: alvo medio 7.1%/dia, max 13.3% (= 5%/nome * 2.0x, +cap).
+
+(B) AS ORDENS DA 1a REBALANCEADA CABEM NO BUYING POWER? — REPRODUZIDO com o
+    Executor REAL contra um broker que modela Reg-T (BP=2x equity, decrementado a
+    cada fill) + pool de caixa separado p/ cripto (fiel a Alpaca):
+
+    HOJE (170% gross, 0% cripto), conta 100k:
+      BP=2.0x -> 4/4 ordens enviadas, 0 rejeitadas. CABE (folga de 30pp).
+      BP=1.5x -> IEF REJEITADA (1/4 cai).   BP=1.0x -> IEF REJEITADA.
+    => hoje cabe SE e somente se o BP for ~2x. Com folga, mas a folga some em dias
+       de gross 200%.
+
+    PIOR CASO historico 2016-06-02 (gross 200%, BTC 10%), conta 100k:
+      BP=2.0x -> 5/5 enviadas (gross 200% = 2x exatamente; folga ZERO).
+      BP=1.9x -> BTC/USD REJEITADA.   BP=1.5x -> IEF REJEITADA.   BP=1.0x -> 2 caem.
+    => a 200% de gross NAO ha folga nenhuma: qualquer BP abaixo de 2.0x derruba
+       ordem. E nesses dias de gross alto que a cripto e a 1a a cair.
+
+(C) *** O FURO DA CRIPTO (o achado central) *** — REPRODUZIDO com semantica de DOIS
+    POOLS fiel a Alpaca (acoes consomem buying_power marginavel; cripto consome
+    CAIXA / non_marginable). Pior caso 2016-06-02, conta MARGEM 100k:
+      intents (na ordem do loop do universo): SPY 38.9k, QQQ 30.8k, TLT 38.0k,
+                                              IEF 82.0k, BTC/USD 10.0k.
+      Executor: 5 enviadas ao broker, 0 barradas no gate (o gate checa o pool
+                MARGINAVEL, que ainda mostra espaco).
+      Broker (Alpaca real): SPY/QQQ/TLT/IEF PREENCHEM (190% em margem) e consomem o
+                CAIXA como colateral; BTC/USD -> REJEITADA: "insufficient
+                non-marginable buying power" (nao sobrou CAIXA p/ a cripto cash-only).
+      RESULTADO: book vivo = 190% acoes + 0% cripto  vs  backtest = 190% + 10% BTC.
+      -> A PARIDADE QUEBRA no leg de cripto. E SILENCIOSO (so um warning no log do
+         Executor + audit order_rejected/submit; o ciclo segue e marca o mes feito).
+
+    POR QUE A 1.5x NAO MORDIA: a 1.0/1.5x as acoes deixavam caixa suficiente; a
+    cripto cabia. A 2.0x o book toma margem e zera o caixa -> a cripto cash-only
+    nao tem de onde sair. E um efeito DIRETO da alavancagem 2.0x sobre um leg que
+    NAO pode ser alavancado.
+
+    FREQUENCIA (estimada com requisito Reg-T): cripto>0 em 1066 dias; em ~297
+    desses (28%) o caixa livre (~1 - gross_acoes/2) fica ABAIXO do alvo de cripto
+    -> cripto seria rejeitada. Recente: cripto>0 ate 2025-12-01 (266 dos ultimos
+    400 pregoes). Ou seja, VAI acontecer dentro de um track record vivo.
+
+(D) AGRAVANTE DE CODIGO: o Executor checa cripto contra account.buying_power (o
+    pool MARGINAVEL), nao contra o caixa. E o AccountInfo (broker/base.py:54) NEM
+    TEM non_marginable_buying_power — o AlpacaBroker.get_account (alpaca_broker.py:
+    90-99) so traz cash/buying_power/equity. Logo o Executor NAO consegue, nem que
+    quisesse, barrar a cripto cedo: ele a envia e a Alpaca rejeita server-side. O
+    book diverge sem o sistema "saber" no pre-trade.
+
+(E) O QUE ISSO PRODUZ EM PRODUCAO: ordens parciais/rejeicao server-side -> o book
+    fica diferente do backtest. O backtest a 2.0x assume alavancagem UNIFORME de
+    2.0x INCLUSIVE na cripto (leverage_weights escala tudo). Como na conta real a
+    cripto fica 1x (ou 0x quando sem caixa), o track record a 2.0x NAO reproduz a
+    serie validada — justamente o que invalida o uso do track p/ AUM.
+
+STATUS ITEM 4: ***NAO FECHA.*** O que precisa (escolha uma):
+  (i) TRATAR CRIPTO COMO 1x e ACEITAR a divergencia: NAO aplicar os 2.0x ao leg de
+      cripto (cap o peso de BTC/ETH ao seu valor 1x, ou reservar caixa p/ cripto
+      ANTES das acoes). Documentar que o produto vivo e "acoes 2.0x + cripto 1x" —
+      e RE-RODAR o backtest com cripto 1x p/ que o track record bata com o que de
+      fato vai pra conta. (Hoje o backtest e cripto 2.0x; haveria mismatch.)
+  (ii) REMOVER cripto do universo de PRODUCAO a 2.0x (rodar so acoes/ETF a 2.0x) e
+      re-rodar o backtest sem cripto p/ a paridade. (Cripto e "tempero", nao motor —
+      o proprio frontier_report diz que mover de 5%->10% quase nao muda o CAGR.)
+  (iii) Se INSISTIR em cripto 2.0x: a conta paper precisaria de CAIXA livre >= alvo
+      de cripto SIMULTANEO ao book de acoes a 2.0x — o que e impossivel a 200%
+      gross numa conta 2:1. Inviavel sem baixar a alavancagem das ACOES. NAO
+      recomendo.
+  + ORDEM DE EXECUCAO: enviar a CRIPTO ANTES das acoes nao resolve de forma
+    robusta (em dias de 200% gross o caixa some de qualquer jeito), mas hoje o loop
+    manda acoes primeiro (universo: ...,BTC-USD,ETH-USD no fim) — o pior caso p/ a
+    cripto. No minimo, o fix deve garantir caixa p/ cripto.
+
+================================================================================
+PARTE 5 — FLAG OFF == LEGADO; SUITE 367 VERDE
+================================================================================
+[OK] FLAG OFF == LEGADO: beta_live_enabled()=False; run_beta_rebalance_cycle ->
+     {enabled:False, executed:0}, broker.submitted=[]; refresh_production_panel ->
+     {refreshed:False}. Importar os modulos nao toca broker/dados/scheduler.
+[OK] SUITE: 367 passed, 0 skip/xfail (56 no beta). Reproduzido.
+[RESSALVA sobre os testes do item 4] os testes que "provam" que a operacao 2.0x
+     nao bloqueia (test_2x_normal_rebalance_does_not_block_any_legit_buy:512-517;
+     test_mf2_nav_path...:659-662) usam buying_power=US$9.000.000 / US$5.000.000
+     numa conta de ~100k-1M — i.e., SIDESTEPAM o gate de margem dando BP quase
+     infinito. So provam o per-symbol/peso, NAO a margem/caixa real. E
+     test_mf3_crypto_executes (730) testa a cripto ISOLADA (book sintetico de gross
+     baixo, BP=caixa=100k), nunca a cripto JUNTO de um book de acoes a 2.0x que
+     consumiu o caixa. Por isso os 367 verdes NAO cobrem o bloqueador deste
+     relatorio — o gap de teste e exatamente o cenario que reproduzi a mao.
+
+================================================================================
+VEREDITO FINAL
+================================================================================
+*** AINDA NAO: ligar a 2.0x no paper HOJE grava um track record que NAO bate com o
+backtest 2.0x validado, por causa do leg de CRIPTO. ***
+
+LISTA do que falta antes do day-0 a 2.0x:
+  1. [BLOQUEADOR] Resolver CRIPTO a 2.0x. Cripto e cash-only (1x) na Alpaca; a 2.0x
+     o book de acoes consome o caixa e a cripto e rejeitada (reproduzido; ~28% dos
+     dias com cripto). Escolher: (a) tratar cripto como 1x + reservar caixa + RE-
+     RODAR o backtest com cripto 1x p/ a paridade; OU (b) remover cripto do universo
+     2.0x + re-rodar backtest sem cripto. Em AMBOS, o backtest precisa ser refeito
+     p/ refletir o que de fato vai pra conta — senao o track diverge do divulgado.
+  2. [PRE-CONDICAO] Confirmar que a conta paper e MARGEM com Reg-T 2:1 PLENO
+     (buying_power == 2x equity, equity >= US$2.000). Sem isso, ate as ACOES a 200%
+     gross sao rejeitadas (reproduzido: BP<2.0x derruba ordem). Logar e checar
+     account.buying_power/equity no boot do beta (main.py ja loga em :431).
+  3. [RECOMENDADO] Fechar o gap de teste: um teste que rode a 1a rebalanceada a
+     2.0x com BP=2x REALISTA (nao 9M) e com pool de caixa de cripto separado, e
+     asserte que a cripto NAO e silenciosamente perdida (ou que e tratada 1x).
+  4. [BAIXO] Corrigir o comentario config/risk.py:140 (gross "medio ~166%" -> real
+     150.3%) p/ a doc nao induzir erro; nao e bloqueador (superestima).
+
+O QUE JA ESTA BOM (nao precisa mexer): os 3 guards (DD-43/daily-8/per-symbol-210)
+estao calibrados certo ao perfil 2.0x e so pegam anomalia; a paridade de PESO e
+bit-a-bit; nenhuma regressao no nucleo; flag OFF == legado; 367 verdes.
+
+Em uma frase: a alavancagem 2.0x esta CORRETA p/ o book de ACOES (guards, paridade,
+sizing), mas QUEBRA no leg de CRIPTO porque cripto nao pode ser alavancada na
+Alpaca — e o backtest assume 2.0x uniforme inclusive na cripto. Trate a cripto como
+1x (ou remova-a) e re-rode o backtest; confirme o BP 2x; entao e seguro.
+================================================================================

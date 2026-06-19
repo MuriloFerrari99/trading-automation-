@@ -1,0 +1,155 @@
+==============================================================================
+SYSTEM 3 — FASE 1: EXISTE SINAL DE ORDER-FLOW PREDITIVO? (cripto, Binance)
+==============================================================================
+
+Pergunta: o sinal de order-flow em t PREVE o retorno t->t+h em horizontes
+curtos? Metrica = Information Coefficient (correlacao de Spearman/Pearson),
+sem look-ahead (sinal termina em t, retorno comeca em t).
+
+Comando p/ baixar e reanalisar (quando houver rede):
+  uv run python -m microstructure.report --symbols BTCUSDT,ETHUSDT \
+      --days 2026-06-10,2026-06-11,2026-06-12,2026-06-13,2026-06-14
+
+------------------------------------------------------------------------------
+(1) STATUS DOS DADOS
+------------------------------------------------------------------------------
+  BTCUSDT    aggTrades (um): REAL — 5 dia(s) [2026-06-10, 2026-06-11, 2026-06-12, 2026-06-13, 2026-06-14]
+  ETHUSDT    aggTrades (um): REAL — 5 dia(s) [2026-06-10, 2026-06-11, 2026-06-12, 2026-06-13, 2026-06-14]
+
+  bookTicker (topo de livro p/ queue imbalance / microprice / OFI):
+    HEAD em 10 arquivo(s): 0 OK, 10 404. 
+    -> bookTicker historico INDISPONIVEL no arquivo publico (data.binance.vision).
+       Sinais de LIVRO (queue imbalance, microprice, OFI Cont-Kukanov) ficam
+       DEFINIDOS no codigo (microstructure.signals) porem PENDENTES de dado.
+       Captura viavel: coletor L2 AO VIVO (forward capture), ja pronto em
+       simulation.binance_book --collect (reaproveitado, nao reescrito).
+
+  Sinais EFETIVAMENTE testados nesta rodada (so aggTrades / trade-flow):
+    tfi_Ws      = (Vbuy-Vsell)/(Vbuy+Vsell) na janela W
+    tfi_cnt_Ws  = mesmo por CONTAGEM de trades
+    tfi_log_Ws  = sign-log do fluxo assinado liquido
+    ofi_trade_Ws= fluxo assinado normalizado por preco (proxy de OFI so-trade)
+    janelas W = [1, 5, 10]s | horizontes = [1, 5, 10, 30, 60]s
+    Preco de referencia = last-trade price (bookTicker indisponivel); proxy
+    sem look-ahead, porem com bid-ask bounce que infla ruido nos horizontes curtos.
+
+------------------------------------------------------------------------------
+(2) IC POR SINAL x HORIZONTE (dispersao + estabilidade entre dias)
+------------------------------------------------------------------------------
+
+### BTCUSDT (um, step=1s, dias=5)
+  IC SPEARMAN MEDIO (entre dias) por sinal x horizonte
+  signal                  1s        5s       10s       30s       60s
+  ------------------------------------------------------------------
+  ofi_trade_1s       +0.0491   +0.0679   +0.0497   +0.0247   +0.0071
+  ofi_trade_5s       +0.0713   +0.0676   +0.0400   +0.0087   -0.0150
+  ofi_trade_10s      +0.0436   +0.0360   +0.0154   -0.0105   -0.0351
+  tfi_1s             -0.0371   +0.0313   +0.0318   +0.0185   +0.0029
+  tfi_5s             +0.0688   +0.0729   +0.0481   +0.0168   -0.0087
+  tfi_10s            +0.0519   +0.0505   +0.0299   +0.0019   -0.0261
+  tfi_cnt_1s         -0.0310   +0.0352   +0.0351   +0.0215   +0.0053
+  tfi_cnt_5s         +0.0829   +0.0826   +0.0532   +0.0234   -0.0035
+  tfi_cnt_10s        +0.0665   +0.0585   +0.0362   +0.0093   -0.0191
+  tfi_log_1s         +0.0492   +0.0679   +0.0497   +0.0247   +0.0071
+  tfi_log_5s         +0.0713   +0.0675   +0.0399   +0.0087   -0.0150
+  tfi_log_10s        +0.0436   +0.0359   +0.0154   -0.0105   -0.0350
+  
+  ESTABILIDADE entre dias (no horizonte de |IC| maximo por sinal)
+  signal             h*        IC      std    tstat    hit  days        obs
+  --------------------------------------------------------------------------
+  ofi_trade_1s       5s   +0.0679   0.0125   +12.15   1.00     5    431,975
+  ofi_trade_5s       1s   +0.0713   0.0059   +26.94   1.00     5    431,995
+  ofi_trade_10s      1s   +0.0436   0.0100    +9.77   1.00     5    431,995
+  tfi_1s             1s   -0.0371   0.1010    -0.82   0.60     5    431,995
+  tfi_5s             5s   +0.0729   0.0246    +6.62   1.00     5    431,975
+  tfi_10s            1s   +0.0519   0.0047   +24.53   1.00     5    431,995
+  tfi_cnt_1s         5s   +0.0352   0.0475    +1.65   0.60     5    431,975
+  tfi_cnt_5s         1s   +0.0829   0.0294    +6.30   1.00     5    431,995
+  tfi_cnt_10s        1s   +0.0665   0.0081   +18.42   1.00     5    431,995
+  tfi_log_1s         5s   +0.0679   0.0124   +12.23   1.00     5    431,975
+  tfi_log_5s         1s   +0.0713   0.0059   +26.98   1.00     5    431,995
+  tfi_log_10s        1s   +0.0436   0.0100    +9.77   1.00     5    431,995
+
+  DECAIMENTO com o horizonte:
+    decaimento (sinal de maior |IC| = tfi_cnt_5s): 1s=+0.0829, 5s=+0.0826, 10s=+0.0532, 30s=+0.0234, 60s=-0.0035
+      -> de 1s a 60s o |IC| decai (+0.0829 -> -0.0035).
+
+### ETHUSDT (um, step=1s, dias=5)
+  IC SPEARMAN MEDIO (entre dias) por sinal x horizonte
+  signal                  1s        5s       10s       30s       60s
+  ------------------------------------------------------------------
+  ofi_trade_1s       +0.0396   +0.0513   +0.0393   +0.0194   +0.0058
+  ofi_trade_5s       +0.0579   +0.0544   +0.0306   +0.0023   -0.0141
+  ofi_trade_10s      +0.0393   +0.0303   +0.0095   -0.0182   -0.0324
+  tfi_1s             -0.0286   +0.0241   +0.0252   +0.0145   +0.0033
+  tfi_5s             +0.0549   +0.0600   +0.0380   +0.0105   -0.0057
+  tfi_10s            +0.0473   +0.0445   +0.0239   -0.0061   -0.0212
+  tfi_cnt_1s         -0.0228   +0.0244   +0.0252   +0.0163   +0.0046
+  tfi_cnt_5s         +0.0606   +0.0588   +0.0367   +0.0164   -0.0032
+  tfi_cnt_10s        +0.0538   +0.0462   +0.0283   +0.0052   -0.0136
+  tfi_log_1s         +0.0396   +0.0513   +0.0393   +0.0194   +0.0058
+  tfi_log_5s         +0.0579   +0.0544   +0.0306   +0.0023   -0.0141
+  tfi_log_10s        +0.0392   +0.0303   +0.0095   -0.0182   -0.0324
+  
+  ESTABILIDADE entre dias (no horizonte de |IC| maximo por sinal)
+  signal             h*        IC      std    tstat    hit  days        obs
+  --------------------------------------------------------------------------
+  ofi_trade_1s       5s   +0.0513   0.0101   +11.35   1.00     5    431,975
+  ofi_trade_5s       1s   +0.0579   0.0067   +19.30   1.00     5    431,995
+  ofi_trade_10s      1s   +0.0393   0.0094    +9.34   1.00     5    431,995
+  tfi_1s             1s   -0.0286   0.0954    -0.67   0.40     5    431,995
+  tfi_5s             5s   +0.0600   0.0204    +6.58   1.00     5    431,975
+  tfi_10s            1s   +0.0473   0.0046   +23.14   1.00     5    431,995
+  tfi_cnt_1s        10s   +0.0252   0.0146    +3.84   1.00     5    431,950
+  tfi_cnt_5s         1s   +0.0606   0.0277    +4.89   1.00     5    431,995
+  tfi_cnt_10s        1s   +0.0538   0.0062   +19.32   1.00     5    431,995
+  tfi_log_1s         5s   +0.0513   0.0101   +11.35   1.00     5    431,975
+  tfi_log_5s         1s   +0.0579   0.0067   +19.28   1.00     5    431,995
+  tfi_log_10s        1s   +0.0392   0.0094    +9.34   1.00     5    431,995
+
+  DECAIMENTO com o horizonte:
+    decaimento (sinal de maior |IC| = tfi_cnt_5s): 1s=+0.0606, 5s=+0.0588, 10s=+0.0367, 30s=+0.0164, 60s=-0.0032
+      -> de 1s a 60s o |IC| decai (+0.0606 -> -0.0032).
+
+  Leitura: IC>0 => sinal alto antecede retorno positivo. |t-stat| alto e
+  hit-rate alto entre dias => persistente (nao ruido de 1 dia). std alto e
+  hit~0.5 => instavel/ruido. |IC| caindo com h => decaimento (esperado).
+
+------------------------------------------------------------------------------
+(3) VEREDITO — existe sinal de order-flow preditivo e persistente?
+------------------------------------------------------------------------------
+    SIM (parcial): 66 combinacao(oes) sinal x horizonte cruzam a barra de IC material+persistente.
+    (Nota: ha redundancia — tfi_log_* e ofi_trade_* sao rank-identicos sob Spearman. Familias de sinal DISTINTAS com edge: net_signed_flow, tfi, tfi_cnt.) Top:
+      [FORTE] BTCUSDT tfi_cnt_5s @ 1s: IC=+0.0829 std=0.0294 t-stat=+6.30 hit=1.00
+      [FORTE] BTCUSDT tfi_cnt_5s @ 5s: IC=+0.0826 std=0.0240 t-stat=+7.68 hit=1.00
+      [FORTE] BTCUSDT tfi_5s @ 5s: IC=+0.0729 std=0.0246 t-stat=+6.62 hit=1.00
+      [FORTE] BTCUSDT ofi_trade_5s @ 1s: IC=+0.0713 std=0.0059 t-stat=+26.94 hit=1.00
+      [FORTE] BTCUSDT tfi_log_5s @ 1s: IC=+0.0713 std=0.0059 t-stat=+26.98 hit=1.00
+      [FORTE] BTCUSDT tfi_5s @ 1s: IC=+0.0688 std=0.0200 t-stat=+7.70 hit=1.00
+  
+    HORIZONTE/MAGNITUDE: ver acima. Em microestrutura, IC dessa ordem e o esperado e DECAI com o horizonte (ver secao de decaimento).
+
+------------------------------------------------------------------------------
+(4) VALE IR PARA A FASE 2 (modelo de fill + tribunal)?
+------------------------------------------------------------------------------
+    CONDICIONAL-SIM. Ha sinal preditivo persistente em horizontes curtos, mas
+    IC NAO E LUCRO. Antes de qualquer claim de tradabilidade, a Fase 2 PRECISA:
+     (a) Modelo de FILL realista: adverse selection na latencia de varejo —
+         quando o sinal e forte, o preco JA andou; voce entra por ultimo.
+         Modelar fill maker (fila/cancel) e taker (cruza o spread).
+     (b) CUSTO: fee (taker ~ tier 0) + spread real (do bookTicker, hoje pendente).
+         Reaproveitar simulation.binance_book p/ o spread quando o dado voltar.
+     (c) Submeter o PnL liquido ao tribunal (simulation.statistics: PSR/DSR/PBO).
+    Se o edge bruto (IC pequeno) nao sobreviver a (a)+(b), morre na Fase 2 — e
+    esse e exatamente o ponto do gate.
+
+------------------------------------------------------------------------------
+NOTA DE HONESTIDADE (IC != lucro)
+------------------------------------------------------------------------------
+  - IC mede CORRELACAO sinal->retorno futuro, condicao NECESSARIA, nao suficiente.
+  - Adverse selection: na latencia de varejo, quando o sinal fica forte o preco
+    JA se moveu; o fill que voce consegue e pior que o preco do sinal.
+  - Custo: cruzar o spread (taker) ou perder fila (maker) come o edge. Em cripto
+    o spread mediano e fino (ver simulation/binance_book/spread_report.txt).
+  - So a Fase 2 (fill + custo + tribunal PSR/DSR/PBO) decide tradabilidade.
+

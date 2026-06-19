@@ -1,0 +1,276 @@
+========================================================================================================
+TRIBUNAL CANONICO DA FIMATHE EM FOREX — a tecnica REAL (CR + ZN adjacente projetada)
+========================================================================================================
+
+GATE 1:
+  "PASSA so se, LIQUIDO de spread+swap (INCLUSIVE no estresse 2x):
+   DSR(alpha)>=0.95 E Sharpe_liq_anual(alpha)>=0.8 E alpha>0 vs buy&hold do par E PBO<0.5.
+   Senao FALHA."
+
+CORRECAO CRITICA (Planner): a metrica de aprovacao e ALPHA (excesso sobre buy&hold
+do par na MESMA janela de exposicao), NAO Sharpe vs zero. So-comprar-num-bull nao passa.
+
+Custo: base. SEM look-ahead (sinal no close de i, entrada no open de i+1).
+Saida gap-aware (open real em gap-through; empate intrabar => stop). Sub Ciclo de
+Protecao ativo (breakeven aos 50%, trava aos 100%). SWAP por noite, TRIPLO na quarta.
+n_trials HONESTO (Deflated Sharpe) = pares x combos-TF x variante x swing = 40.
+Combos de TF (marca->opera): D1->H4, H4->H1.
+Variantes de entrada: A=pullback aos 50% do CR; B=rompimento da fronteira da ZN.
+Pares de MENOR vol (foco): EURGBP, USDCHF.
+
+CUSTOS APLICADOS (pips):
+  par       spread  swap_long  swap_short  fonte
+  EURGBP      1.00      -4.00       -5.00  PLACEHOLDER honesto
+  USDCHF      1.20      -2.00       -9.00  PLACEHOLDER honesto
+  EURUSD      0.60     -10.00       -3.00  Hantec(long)
+  GBPUSD      0.90      -8.00       -4.00  PLACEHOLDER honesto
+  USDJPY      0.90       3.00      -12.00  PLACEHOLDER honesto
+  (swap negativo = voce PAGA por noite; so EURUSD long vem de numero publico citado.)
+
+========================================================================================================
+CONFIGS SEM AMOSTRA SUFICIENTE (reportadas, nao suavizadas):
+========================================================================================================
+  USDCHF D1->H4 B sw=10              -> so 3 trades (<5): amostra insuficiente
+
+========================================================================================================
+RESULTADO POR COMBO DE TF (liquido de spread+swap; metrica = ALPHA vs B&H):
+========================================================================================================
+
+--- marca D1 / opera H4 (barras/ano=1512) ---
+  config                        #tr  hold_d   win%   bruto/tr     liq/tr   alpha/tr    swap/tr  Shp_liq  Shp_alf  DSR_alf       B&H ver
+  EURGBP D1->H4 A sw=6           26     9.8   7.7    -0.123%    -1.079%    -0.857%    -0.932%    -7.80    -4.34    0.000   +0.409% FALHA
+  EURGBP D1->H4 A sw=10          20     9.2   5.0    +0.024%    -0.833%    -0.829%    -0.834%    -6.63    -4.94    0.000   +1.226% FALHA
+  EURGBP D1->H4 B sw=6            8    10.0  12.5    +0.043%    -0.949%    -0.856%    -0.968%    -7.14    -3.55    0.000   +1.143% FALHA
+  EURGBP D1->H4 B sw=10           8     9.7  12.5    +0.358%    -0.605%    -0.265%    -0.940%    -6.81    -1.80    0.001   +0.477% FALHA
+  EURUSD D1->H4 A sw=6           23     9.7  26.1    +0.225%    -0.897%    -1.300%    -1.112%    -3.02    -4.63    0.000   +9.836% FALHA
+  EURUSD D1->H4 A sw=10          16    10.0  37.5    +0.267%    -0.857%    -1.511%    -1.113%    -2.76    -5.16    0.000   +8.370% FALHA
+  EURUSD D1->H4 B sw=6            8     9.4  25.0    +0.218%    -0.921%    -0.579%    -1.128%    -3.55    -1.95    0.001   +9.669% FALHA
+  EURUSD D1->H4 B sw=10           5    10.0  20.0    +0.017%    -1.124%    -1.123%    -1.131%    -6.54    -4.97    0.000   +7.422% FALHA
+  GBPUSD D1->H4 A sw=6           23     8.6  17.4    -0.148%    -0.831%    -0.777%    -0.669%    -4.46    -2.62    0.000   +5.117% FALHA
+  GBPUSD D1->H4 A sw=10          16     8.8  12.5    -0.229%    -0.997%    -0.989%    -0.754%    -5.00    -3.45    0.000  +10.629% FALHA
+  GBPUSD D1->H4 B sw=6           12     8.4  25.0    -0.280%    -1.029%    -1.457%    -0.735%    -4.37    -7.30    0.000   +5.142% FALHA
+  GBPUSD D1->H4 B sw=10           7    10.0  14.3    -0.335%    -1.209%    -1.266%    -0.860%    -6.91    -4.17    0.000   +7.992% FALHA
+  USDCHF D1->H4 A sw=6           24    10.0  25.0    +0.035%    -1.140%    -1.547%    -1.146%    -3.61    -4.23    0.000  -11.583% FALHA
+  USDCHF D1->H4 A sw=10          14    10.0  21.4    -0.047%    -1.229%    -1.178%    -1.154%    -3.82    -2.74    0.000  -12.760% FALHA
+  USDCHF D1->H4 B sw=6            9     9.7   0.0    -0.351%    -1.762%    -1.566%    -1.382%    -8.92    -3.97    0.000   -6.625% FALHA
+  USDJPY D1->H4 A sw=6           22     9.8  54.5    +0.278%    -0.052%    -0.189%    -0.318%    -0.13    -0.36    0.006   +4.905% FALHA
+  USDJPY D1->H4 A sw=10          17     8.7  47.1    -0.268%    -0.524%    -0.467%    -0.243%    -1.38    -1.24    0.001   +2.710% FALHA
+  USDJPY D1->H4 B sw=6            8     9.3  25.0    -1.507%    -1.627%    -0.691%    -0.109%    -4.08    -1.90    0.000   +6.957% FALHA
+  USDJPY D1->H4 B sw=10           6     7.6   0.0    -1.698%    -2.034%    -0.613%    -0.324%    -6.50    -2.38    0.000   +3.216% FALHA
+  PBO do grupo (selecao entre 19 configs, sobre ALPHA): n/a (amostra)  [REPROVA >=0.5]
+
+--- marca H4 / opera H1 (barras/ano=6048) ---
+  config                        #tr  hold_d   win%   bruto/tr     liq/tr   alpha/tr    swap/tr  Shp_liq  Shp_alf  DSR_alf       B&H ver
+  EURGBP H4->H1 A sw=6          112     3.4  10.7    -0.038%    -0.398%    -0.410%    -0.337%    -8.19    -6.90    0.000   +0.805% FALHA
+  EURGBP H4->H1 A sw=10          85     4.0  12.9    +0.028%    -0.375%    -0.412%    -0.380%    -5.90    -5.47    0.000   +0.827% FALHA
+  EURGBP H4->H1 B sw=6           50     3.1   2.0    -0.071%    -0.399%    -0.352%    -0.305%   -11.25    -8.14    0.000   +0.764% FALHA
+  EURGBP H4->H1 B sw=10          32     3.8  15.6    -0.018%    -0.408%    -0.360%    -0.367%    -7.68    -4.79    0.000   -0.007% FALHA
+  EURUSD H4->H1 A sw=6           91     3.8  18.7    -0.021%    -0.425%    -0.445%    -0.393%    -3.99    -2.97    0.000   +7.603% FALHA
+  EURUSD H4->H1 A sw=10          75     4.2  20.0    -0.075%    -0.507%    -0.721%    -0.421%    -4.19    -4.28    0.000   +8.207% FALHA
+  EURUSD H4->H1 B sw=6           40     3.0  12.5    -0.140%    -0.389%    -0.387%    -0.238%    -5.77    -4.02    0.000   +7.789% FALHA
+  EURUSD H4->H1 B sw=10          32     3.6   6.2    -0.328%    -0.696%    -0.807%    -0.357%    -7.25    -7.93    0.000   +6.503% FALHA
+  GBPUSD H4->H1 A sw=6          102     3.6  21.6    -0.009%    -0.327%    -0.419%    -0.304%    -3.66    -3.54    0.000   +9.406% FALHA
+  GBPUSD H4->H1 A sw=10          78     4.1  21.8    -0.074%    -0.420%    -0.416%    -0.332%    -3.71    -2.33    0.000   +9.935% FALHA
+  GBPUSD H4->H1 B sw=6           49     3.2  24.5    +0.002%    -0.274%    -0.292%    -0.263%    -3.07    -2.30    0.000  +10.175% FALHA
+  GBPUSD H4->H1 B sw=10          39     3.9  25.6    -0.020%    -0.372%    -0.455%    -0.338%    -3.12    -2.55    0.000   +9.660% FALHA
+  USDCHF H4->H1 A sw=6          103     3.6  19.4    -0.045%    -0.478%    -0.404%    -0.405%    -3.94    -2.17    0.000  -10.842% FALHA
+  USDCHF H4->H1 A sw=10          80     3.9  13.8    -0.205%    -0.737%    -0.650%    -0.504%    -6.24    -3.78    0.000  -12.978% FALHA
+  USDCHF H4->H1 B sw=6           39     3.4  15.4    -0.124%    -0.570%    -0.626%    -0.417%    -5.27    -4.94    0.000  -12.767% FALHA
+  USDCHF H4->H1 B sw=10          30     4.1  16.7    -0.201%    -0.781%    -0.518%    -0.551%    -6.28    -3.62    0.000  -12.206% FALHA
+  USDJPY H4->H1 A sw=6          106     3.5  39.6    -0.094%    -0.298%    -0.348%    -0.192%    -2.08    -1.53    0.000   +9.155% FALHA
+  USDJPY H4->H1 A sw=10          74     4.2  44.6    -0.006%    -0.184%    -0.190%    -0.166%    -1.05    -0.71    0.002   +6.909% FALHA
+  USDJPY H4->H1 B sw=6           45     3.5  48.9    +0.029%    -0.151%    -0.499%    -0.168%    -1.10    -2.92    0.000   +7.706% FALHA
+  USDJPY H4->H1 B sw=10          31     3.4  51.6    +0.077%    -0.040%    -0.361%    -0.106%    -0.26    -1.64    0.001   +7.028% FALHA
+  PBO do grupo (selecao entre 20 configs, sobre ALPHA): 0.26  [OK <0.5]
+
+========================================================================================================
+QUAL ENTRADA FUNCIONA MELHOR? (50% do CR [A] vs rompimento da ZN [B]):
+========================================================================================================
+  variante A (50% do CR): 20 configs | Shp_alpha medio=-3.37 alpha/tr medio=-0.703% | melhor=USDJPY D1->H4 A sw=6 Shp_alpha=-0.36 alpha/tr=-0.189%
+  variante B (rompimento da ZN): 19 configs | Shp_alpha medio=-3.94 alpha/tr medio=-0.688% | melhor=USDJPY H4->H1 B sw=10 Shp_alpha=-1.64 alpha/tr=-0.361%
+
+========================================================================================================
+MELHOR CONFIG GLOBAL (por Sharpe do ALPHA):
+========================================================================================================
+  USDJPY D1->H4 A sw=6: #tr=22 hold=9.8d win%=54.5
+    bruto/tr=+0.278% liq/tr=-0.052% alpha/tr=-0.189% swap/tr=-0.318%
+    Sharpe_liq=-0.13 Sharpe_ALPHA=-0.36 DSR(alpha)=0.006 total_liq=-1.573% (B&H=+4.905%)
+
+========================================================================================================
+RECORTE — PARES DE MENOR VOLATILIDADE (EURGBP, USDCHF):
+========================================================================================================
+  EURGBP D1->H4 B sw=10: Shp_alpha=-1.80 alpha/tr=-0.265% liq/tr=-0.605% (alpha<=0)
+  USDCHF H4->H1 A sw=6: Shp_alpha=-2.17 alpha/tr=-0.404% liq/tr=-0.478% (alpha<=0)
+  USDCHF D1->H4 A sw=10: Shp_alpha=-2.74 alpha/tr=-1.178% liq/tr=-1.229% (alpha<=0)
+  EURGBP D1->H4 B sw=6: Shp_alpha=-3.55 alpha/tr=-0.856% liq/tr=-0.949% (alpha<=0)
+  USDCHF H4->H1 B sw=10: Shp_alpha=-3.62 alpha/tr=-0.518% liq/tr=-0.781% (alpha<=0)
+
+========================================================================================================
+QUANTO O SWAP COMEU DO EDGE:
+========================================================================================================
+  Media entre 39 configs: bruto/tr=-0.124%  swap/tr=-0.574%  spread/tr=-0.017%  liq/tr=-0.716%  alpha/tr=-0.696%
+  Hold medio=6.5 dias  noites medias/trade=9.0
+  Retorno BRUTO medio <=0: a entrada canonica nao gera edge bruto positivo medio; o swap apenas enterra mais fundo.
+
+========================================================================================================
+##############################################################################
+#                                                                            #
+#   F A L H A   —   FIMATHE CANONICA EM FOREX NAO TEM ALPHA                   #
+#                                                                            #
+#   Nenhuma config (par x combo-TF x variante x swing) passou o GATE 1:       #
+#   DSR(alpha)>=0.95 E Sharpe_alpha>=0.8 E alpha>0 vs buy&hold E PBO<0.5.      #
+#   A tecnica REAL (CR + ZN adjacente, a favor da tendencia, stop fora da     #
+#   ZN, alvo 2x, sub-ciclo) tambem nao bate segurar o par, liquido de         #
+#   spread+swap. Resultado HONESTO e valioso: o lever price-based esta        #
+#   esgotado; restaria dado alternativo. NAO seguir p/ dinheiro real.         #
+#                                                                            #
+##############################################################################
+========================================================================================================
+
+
+========================================================================================================
+TRIBUNAL CANONICO DA FIMATHE EM FOREX — a tecnica REAL (CR + ZN adjacente projetada)
+========================================================================================================
+
+GATE 1:
+  "PASSA so se, LIQUIDO de spread+swap (INCLUSIVE no estresse 2x):
+   DSR(alpha)>=0.95 E Sharpe_liq_anual(alpha)>=0.8 E alpha>0 vs buy&hold do par E PBO<0.5.
+   Senao FALHA."
+
+CORRECAO CRITICA (Planner): a metrica de aprovacao e ALPHA (excesso sobre buy&hold
+do par na MESMA janela de exposicao), NAO Sharpe vs zero. So-comprar-num-bull nao passa.
+
+Custo: ESTRESSADO(2x). SEM look-ahead (sinal no close de i, entrada no open de i+1).
+Saida gap-aware (open real em gap-through; empate intrabar => stop). Sub Ciclo de
+Protecao ativo (breakeven aos 50%, trava aos 100%). SWAP por noite, TRIPLO na quarta.
+n_trials HONESTO (Deflated Sharpe) = pares x combos-TF x variante x swing = 40.
+Combos de TF (marca->opera): D1->H4, H4->H1.
+Variantes de entrada: A=pullback aos 50% do CR; B=rompimento da fronteira da ZN.
+Pares de MENOR vol (foco): EURGBP, USDCHF.
+
+CUSTOS APLICADOS (pips):
+  par       spread  swap_long  swap_short  fonte
+  EURGBP      2.00      -8.00      -10.00  PLACEHOLDER honesto
+  USDCHF      2.40      -4.00      -18.00  PLACEHOLDER honesto
+  EURUSD      1.20     -20.00       -6.00  Hantec(long)
+  GBPUSD      1.80     -16.00       -8.00  PLACEHOLDER honesto
+  USDJPY      1.80       0.00      -24.00  PLACEHOLDER honesto
+  (swap negativo = voce PAGA por noite; so EURUSD long vem de numero publico citado.)
+
+========================================================================================================
+CONFIGS SEM AMOSTRA SUFICIENTE (reportadas, nao suavizadas):
+========================================================================================================
+  USDCHF D1->H4 B sw=10              -> so 3 trades (<5): amostra insuficiente
+
+========================================================================================================
+RESULTADO POR COMBO DE TF (liquido de spread+swap; metrica = ALPHA vs B&H):
+========================================================================================================
+
+--- marca D1 / opera H4 (barras/ano=1512) ---
+  config                        #tr  hold_d   win%   bruto/tr     liq/tr   alpha/tr    swap/tr  Shp_liq  Shp_alf  DSR_alf       B&H ver
+  EURGBP D1->H4 A sw=6           26     9.8   0.0    -0.123%    -2.035%    -1.813%    -1.865%   -14.81    -9.17    0.000   +0.409% FALHA
+  EURGBP D1->H4 A sw=10          20     9.2   0.0    +0.024%    -1.690%    -1.686%    -1.668%   -13.97   -10.52    0.000   +1.226% FALHA
+  EURGBP D1->H4 B sw=6            8    10.0   0.0    +0.043%    -1.941%    -1.848%    -1.937%   -14.25    -7.66    0.000   +1.143% FALHA
+  EURGBP D1->H4 B sw=10           8     9.7   0.0    +0.358%    -1.569%    -1.228%    -1.880%   -19.38    -9.51    0.000   +0.477% FALHA
+  EURUSD D1->H4 A sw=6           23     9.7   8.7    +0.225%    -2.020%    -2.423%    -2.224%    -6.26    -7.41    0.000   +9.836% FALHA
+  EURUSD D1->H4 A sw=10          16    10.0   6.2    +0.267%    -1.981%    -2.635%    -2.226%    -6.10    -8.18    0.000   +8.370% FALHA
+  EURUSD D1->H4 B sw=6            8     9.4  12.5    +0.218%    -2.060%    -1.718%    -2.256%    -5.69    -4.32    0.000   +9.669% FALHA
+  EURUSD D1->H4 B sw=10           5    10.0   0.0    +0.017%    -2.266%    -2.264%    -2.261%    -8.45    -7.38    0.000   +7.422% FALHA
+  GBPUSD D1->H4 A sw=6           23     8.6   8.7    -0.148%    -1.514%    -1.460%    -1.338%    -7.16    -4.60    0.000   +5.117% FALHA
+  GBPUSD D1->H4 A sw=10          16     8.8   6.2    -0.229%    -1.764%    -1.756%    -1.507%    -7.70    -5.74    0.000  +10.629% FALHA
+  GBPUSD D1->H4 B sw=6           12     8.4   8.3    -0.280%    -1.777%    -2.205%    -1.470%    -7.04   -10.69    0.000   +5.142% FALHA
+  GBPUSD D1->H4 B sw=10           7    10.0   0.0    -0.335%    -2.082%    -2.139%    -1.719%   -10.74    -7.10    0.000   +7.992% FALHA
+  USDCHF D1->H4 A sw=6           24    10.0  20.8    +0.035%    -2.314%    -2.722%    -2.291%    -5.28    -5.75    0.000  -11.583% FALHA
+  USDCHF D1->H4 A sw=10          14    10.0  14.3    -0.047%    -2.412%    -2.360%    -2.308%    -5.77    -4.62    0.000  -12.760% FALHA
+  USDCHF D1->H4 B sw=6            9     9.7   0.0    -0.351%    -3.173%    -2.977%    -2.763%   -11.20    -6.36    0.000   -6.625% FALHA
+  USDJPY D1->H4 A sw=6           22     9.8  36.4    +0.278%    -0.812%    -0.949%    -1.066%    -1.74    -1.68    0.000   +4.905% FALHA
+  USDJPY D1->H4 A sw=10          17     8.7  35.3    -0.268%    -1.181%    -1.124%    -0.889%    -2.82    -2.67    0.000   +2.710% FALHA
+  USDJPY D1->H4 B sw=6            8     9.3  12.5    -1.507%    -2.237%    -1.301%    -0.707%    -5.23    -2.84    0.000   +6.957% FALHA
+  USDJPY D1->H4 B sw=10           6     7.6   0.0    -1.698%    -2.667%    -1.246%    -0.945%    -8.36    -3.73    0.000   +3.216% FALHA
+  PBO do grupo (selecao entre 19 configs, sobre ALPHA): n/a (amostra)  [REPROVA >=0.5]
+
+--- marca H4 / opera H1 (barras/ano=6048) ---
+  config                        #tr  hold_d   win%   bruto/tr     liq/tr   alpha/tr    swap/tr  Shp_liq  Shp_alf  DSR_alf       B&H ver
+  EURGBP H4->H1 A sw=6          112     3.4   2.7    -0.038%    -0.758%    -0.770%    -0.674%   -13.62   -12.07    0.000   +0.805% FALHA
+  EURGBP H4->H1 A sw=10          85     4.0   7.1    +0.028%    -0.778%    -0.815%    -0.759%   -11.49   -10.77    0.000   +0.827% FALHA
+  EURGBP H4->H1 B sw=6           50     3.1   0.0    -0.071%    -0.728%    -0.680%    -0.611%   -15.81   -13.77    0.000   +0.764% FALHA
+  EURGBP H4->H1 B sw=10          32     3.8   3.1    -0.018%    -0.799%    -0.750%    -0.733%   -14.23   -10.17    0.000   -0.007% FALHA
+  EURUSD H4->H1 A sw=6           91     3.8  14.3    -0.021%    -0.829%    -0.849%    -0.786%    -6.81    -5.23    0.000   +7.603% FALHA
+  EURUSD H4->H1 A sw=10          75     4.2  13.3    -0.075%    -0.939%    -1.153%    -0.842%    -7.36    -6.66    0.000   +8.207% FALHA
+  EURUSD H4->H1 B sw=6           40     3.0   7.5    -0.140%    -0.637%    -0.636%    -0.476%    -7.56    -6.00    0.000   +7.789% FALHA
+  EURUSD H4->H1 B sw=10          32     3.6   6.2    -0.328%    -1.063%    -1.174%    -0.714%    -9.47   -10.91    0.000   +6.503% FALHA
+  GBPUSD H4->H1 A sw=6          102     3.6  14.7    -0.009%    -0.644%    -0.737%    -0.608%    -7.07    -6.04    0.000   +9.406% FALHA
+  GBPUSD H4->H1 A sw=10          78     4.1  15.4    -0.074%    -0.766%    -0.762%    -0.664%    -6.67    -4.19    0.000   +9.935% FALHA
+  GBPUSD H4->H1 B sw=6           49     3.2  22.4    +0.002%    -0.551%    -0.569%    -0.525%    -6.07    -4.33    0.000  +10.175% FALHA
+  GBPUSD H4->H1 B sw=10          39     3.9  20.5    -0.020%    -0.723%    -0.806%    -0.676%    -5.91    -4.50    0.000   +9.660% FALHA
+  USDCHF H4->H1 A sw=6          103     3.6  12.6    -0.045%    -0.911%    -0.838%    -0.810%    -6.43    -4.15    0.000  -10.842% FALHA
+  USDCHF H4->H1 A sw=10          80     3.9  10.0    -0.205%    -1.270%    -1.183%    -1.008%    -8.95    -6.04    0.000  -12.978% FALHA
+  USDCHF H4->H1 B sw=6           39     3.4   7.7    -0.124%    -1.015%    -1.072%    -0.834%    -7.56    -7.13    0.000  -12.767% FALHA
+  USDCHF H4->H1 B sw=10          30     4.1   6.7    -0.201%    -1.361%    -1.099%    -1.103%    -9.64    -6.65    0.000  -12.206% FALHA
+  USDJPY H4->H1 A sw=6          106     3.5  24.5    -0.094%    -0.631%    -0.681%    -0.514%    -4.11    -2.93    0.000   +9.155% FALHA
+  USDJPY H4->H1 A sw=10          74     4.2  31.1    -0.006%    -0.535%    -0.541%    -0.505%    -2.86    -1.95    0.000   +6.909% FALHA
+  USDJPY H4->H1 B sw=6           45     3.5  22.2    +0.029%    -0.478%    -0.826%    -0.483%    -3.10    -4.45    0.000   +7.706% FALHA
+  USDJPY H4->H1 B sw=10          31     3.4  32.3    +0.077%    -0.312%    -0.633%    -0.366%    -1.83    -2.71    0.000   +7.028% FALHA
+  PBO do grupo (selecao entre 20 configs, sobre ALPHA): 0.07  [OK <0.5]
+
+========================================================================================================
+QUAL ENTRADA FUNCIONA MELHOR? (50% do CR [A] vs rompimento da ZN [B]):
+========================================================================================================
+  variante A (50% do CR): 20 configs | Shp_alpha medio=-6.02 alpha/tr medio=-1.363% | melhor=USDJPY D1->H4 A sw=6 Shp_alpha=-1.68 alpha/tr=-0.949%
+  variante B (rompimento da ZN): 19 configs | Shp_alpha medio=-6.85 alpha/tr medio=-1.325% | melhor=USDJPY H4->H1 B sw=10 Shp_alpha=-2.71 alpha/tr=-0.633%
+
+========================================================================================================
+MELHOR CONFIG GLOBAL (por Sharpe do ALPHA):
+========================================================================================================
+  USDJPY D1->H4 A sw=6: #tr=22 hold=9.8d win%=36.4
+    bruto/tr=+0.278% liq/tr=-0.812% alpha/tr=-0.949% swap/tr=-1.066%
+    Sharpe_liq=-1.74 Sharpe_ALPHA=-1.68 DSR(alpha)=0.000 total_liq=-16.926% (B&H=+4.905%)
+
+========================================================================================================
+RECORTE — PARES DE MENOR VOLATILIDADE (EURGBP, USDCHF):
+========================================================================================================
+  USDCHF H4->H1 A sw=6: Shp_alpha=-4.15 alpha/tr=-0.838% liq/tr=-0.911% (alpha<=0)
+  USDCHF D1->H4 A sw=10: Shp_alpha=-4.62 alpha/tr=-2.360% liq/tr=-2.412% (alpha<=0)
+  USDCHF D1->H4 A sw=6: Shp_alpha=-5.75 alpha/tr=-2.722% liq/tr=-2.314% (alpha<=0)
+  USDCHF H4->H1 A sw=10: Shp_alpha=-6.04 alpha/tr=-1.183% liq/tr=-1.270% (alpha<=0)
+  USDCHF D1->H4 B sw=6: Shp_alpha=-6.36 alpha/tr=-2.977% liq/tr=-3.173% (alpha<=0)
+
+========================================================================================================
+QUANTO O SWAP COMEU DO EDGE:
+========================================================================================================
+  Media entre 39 configs: bruto/tr=-0.124%  swap/tr=-1.205%  spread/tr=-0.035%  liq/tr=-1.365%  alpha/tr=-1.344%
+  Hold medio=6.5 dias  noites medias/trade=9.0
+  Retorno BRUTO medio <=0: a entrada canonica nao gera edge bruto positivo medio; o swap apenas enterra mais fundo.
+
+========================================================================================================
+##############################################################################
+#                                                                            #
+#   F A L H A   —   FIMATHE CANONICA EM FOREX NAO TEM ALPHA                   #
+#                                                                            #
+#   Nenhuma config (par x combo-TF x variante x swing) passou o GATE 1:       #
+#   DSR(alpha)>=0.95 E Sharpe_alpha>=0.8 E alpha>0 vs buy&hold E PBO<0.5.      #
+#   A tecnica REAL (CR + ZN adjacente, a favor da tendencia, stop fora da     #
+#   ZN, alvo 2x, sub-ciclo) tambem nao bate segurar o par, liquido de         #
+#   spread+swap. Resultado HONESTO e valioso: o lever price-based esta        #
+#   esgotado; restaria dado alternativo. NAO seguir p/ dinheiro real.         #
+#                                                                            #
+##############################################################################
+========================================================================================================
+
+
+========================================================================================================
+VEREDITO FINAL (base + estresse 2x):
+========================================================================================================
+  Nenhuma config passou o GATE 1 em nenhum cenario.
+##############################################################################
+#                                                                            #
+#   F A L H A   —   FIMATHE CANONICA EM FOREX NAO TEM ALPHA                   #
+#                                                                            #
+#   Nenhuma config (par x combo-TF x variante x swing) passou o GATE 1:       #
+#   DSR(alpha)>=0.95 E Sharpe_alpha>=0.8 E alpha>0 vs buy&hold E PBO<0.5.      #
+#   A tecnica REAL (CR + ZN adjacente, a favor da tendencia, stop fora da     #
+#   ZN, alvo 2x, sub-ciclo) tambem nao bate segurar o par, liquido de         #
+#   spread+swap. Resultado HONESTO e valioso: o lever price-based esta        #
+#   esgotado; restaria dado alternativo. NAO seguir p/ dinheiro real.         #
+#                                                                            #
+##############################################################################

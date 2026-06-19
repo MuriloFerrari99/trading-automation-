@@ -1,0 +1,222 @@
+================================================================================
+AUDITORIA INDEPENDENTE E ADVERSARIAL — FIMATHE REAL (Canal de Abertura intraday)
+"O CODER" — auditor que NAO escreveu este codigo. Read-only.
+Data: 2026-06-15
+================================================================================
+
+MISSAO: o veredito e FALHA da tese CENTRAL do usuario (FIMATHE). O risco grave e
+um FALHA FALSO por bug — enterrar injustamente a tecnica. ATAQUEI o FALHA por
+todos os angulos: sinal trocado, alvo curto, stop curto, swap por engano, custo
+dobrado, sessao mal cortada, DSR injusto, dado furado, e tentei RESSUSCITAR o
+edge com variantes fieis a spec que o tribunal nao varreu.
+
+ALVOS auditados:
+  fimathe/canal_abertura.py
+  simulation/fimathe_intraday.py
+  data/fimathe_intraday_verdict.txt
+  data/fimathe_intraday_data.py
+Modulos de apoio lidos: simulation/statistics.py, simulation/metrics.py
+Ground truth: docs/FIMATHE_SPEC.md (spec canonica, 64 transcricoes)
+
+################################################################################
+#  VEREDITO:  F A L H A   C O N F I A V E L                                    #
+#  A FIMATHE mecanica (entrada-no-rompimento do Canal de Abertura) realmente   #
+#  NAO tem edge. O encerramento e JUSTO. Nao encontrei nenhum bug capaz de     #
+#  inverter o resultado. Tentei de verdade ressuscitar o edge e falhei.        #
+################################################################################
+
+--------------------------------------------------------------------------------
+RESUMO EXECUTIVO (o que mais importa)
+--------------------------------------------------------------------------------
+1. NAO HA INVERSAO DE SINAL. 433/433 compras tem close>ca_top; 374/374 vendas
+   tem close<ca_bottom. Geometria stop/alvo correta nos dois lados. (canal_abertura.py:189-210)
+2. NAO HA SWAP cobrado. Custo = SO meio-spread por ponta, intraday. round-trip
+   spread XAU = 0.00093% do preco; avg_gross-avg_net = 0.00091% (bate exato).
+3. NAO HA CUSTO DOBRADO nem gross "sujo". ret_gross usa raw_entry->exit limpo;
+   ret_net soma half nas duas pontas. diff=full spread, conferido a mao.
+4. DADOS LIMPOS: 70826 barras XAU, monotonico, 0 duplicatas, 0 OHLC-invalido,
+   0 barras de fim-de-semana, range 1812..5585 (bull do ouro real).
+5. REPRODUZ BIT-A-BIT: `uv run python -m simulation.fimathe_intraday` gera um
+   veredito IDENTICO ao commitado (diff vazio, exit 0). Numeros-manchete batem.
+6. DSR=0.215 e JUSTO. n_trials=12 e honesto (3 ativos x 2 takes x 2 filtros = a
+   grade REAL). Reproduzido exato.
+7. A FALHA E ROBUSTA. Varri 8 ancoras de sessao x 2 metodos de alvo x take x
+   filtro, ATE com custo ZERO e desempate otimista: NENHUMA config passa. O muro
+   intransponivel e o buy&hold do ouro (+120%), que e ground truth (close
+   1957.6->4309.3). Alpha do XAU fica -54pp a -62pp em TODA variante.
+8. O default de sessao (dia-UTC) e, se algo, o MAIS LISONJEIRO ao XAU — ancorar
+   na abertura real (22 UTC) DESTROI o resultado (Sh 1.50 -> 0.21). O tribunal
+   nao "escondeu" edge na escolha de sessao; escolheu a que mais ajuda.
+
+--------------------------------------------------------------------------------
+PONTOS VERIFICADOS (cite arquivo:linha)
+--------------------------------------------------------------------------------
+
+[1] CANAL DE ABERTURA — 4 primeiras velas, caixa correta?  => CORRETO
+    canal_abertura.py:174-182. top=max(mh[i:i+ob]), bot=min(ml[i:i+ob]), ob=4
+    (default, CanalAberturaParams.opening_bars=4 :76). Caixa por SOMBRA
+    (high/low) :149-153 — escolha CONSERVADORA (caixa mais larga -> stop mais
+    largo -> edge precisa vencer MAIS, nao menos). ca_fixed so a partir da barra
+    ob :182, e nao se opera durante a formacao. Confere com a spec ("4 primeiras
+    velas M15", 33 transcricoes). Empiricamente: bar_in_session 0..3 = CA, ca_top
+    /ca_bottom = extremos dessas 4 velas (verificado em 3 sessoes amostradas).
+    Sessao SEM ambiguidade: id ordinal por dia-UTC ou por break_hour
+    (_session_ids :93-108). Exatamente 1 is_session_last por sessao (verificado:
+    0 sessoes com !=1). 58 sessoes tem <=4 barras -> nao operam (correto).
+
+[2] ENTRADA INVERTIDA?  => NAO. Sentido correto, fill correto, sem look-ahead.
+    canal_abertura.py:189-191: close>top -> side=+1 (compra); close<bot ->
+    side=-1 (venda). EMPIRICO: 807 sinais, 100% coerentes (433 buy todos com
+    close>ca_top; 374 sell todos com close<ca_bottom). Sinal no FECHAMENTO da
+    barra k (:184-217), entrada no OPEN de k+1 (fimathe_intraday.py:123-127,
+    ei=i+1, raw_entry=o[ei]). Sem look-ahead: entra 1 barra DEPOIS do sinal,
+    nunca antes. Restringe k a [i+ob, j-1) (:187) -> exige k+1 na MESMA sessao
+    (day trade). 0 sinais na ultima barra (un-enterable) — verificado.
+
+[3] STOP / ALVO  => CORRETO (e conservador), com 1 nuance de design (ver [B]).
+    canal_abertura.py:199-210. Compra: stop=bot-1*range (fora da ZN, abaixo),
+    tp1=top+1*range, tp2=top+2*range. Venda: espelhado. Guarda de coerencia
+    stop<entry<tp1<tp2 (:204,210) com break se incoerente (:211-212) — nunca
+    emite niveis invertidos. Stop a ~1 range do lado oposto NAO e curto (e ~2
+    ranges do preco de rompimento) -> nao mata trades cedo: dist. de saida =
+    452 target / 260 stop / 95 session_end (saudavel; so 12% liquidam no fim).
+    Alvo NAO esta curto: take2 ja e ~200% de expansao. NUANCE [B]: alvos medidos
+    da BORDA do CA (entry_ref), nao do open real de entrada -> ver secao [B].
+
+[4] INTRADAY / liquidacao de fim de sessao  => CORRETO. Nao corta cedo demais.
+    fimathe_intraday.py:162-164: while caminha DENTRO da sessao (sid[j]==s); so
+    no is_last[j] liquida no CLOSE. Nao ha corte artificial antes do fim do
+    pregao — o trade roda ate stop, alvo OU ultima barra. So 95/807 (12%)
+    terminam por session_end; a maioria resolve por alvo/stop. Sem overnight
+    (correto p/ day trade). is_session_last vem do motor (:132-142), 1 por sessao.
+
+[5] CUSTO — so meio-spread, sem swap?  => CORRETO. Sem swap. Tamanho minusculo.
+    fimathe_intraday.py:103 half=full_spread/2; :132 entry=raw_entry+side*half
+    (paga meio na entrada); :170 exit_net=exit_fill-side*half (paga meio na
+    saida). full_spread vem de spread_price (data:90-93) = pips*pip_size, SEM
+    nenhum termo de swap/overnight em lugar nenhum (grep confirmado no codigo).
+    XAU: half=0.0125 = 0.00047% de ~2676; round-trip 0.00093%. Conferido:
+    avg_gross-avg_net = 0.00091%. Gross (1.521) ~ Net (1.500): o spread do ouro
+    e desprezivel em % de uma cotacao de milhares — exatamente como diz o veredito.
+    NAO ha FALHA falsa por custo.
+
+[6] DSR=0.21 justo? n_trials=12 honesto? alpha negativo real?  => SIM, TUDO JUSTO.
+    statistics.py:103-113 (expected_max_sharpe, Bailey-LdP 2014) +146-199
+    (evaluate_edge). DSR=0.215 reproduzido EXATO com trial_sharpes = os 12
+    Sharpes-por-periodo da grade real (fimathe_intraday.py:312). n_trials=12 =
+    3 ativos x 2 takes x 2 filtros (:297) = a busca REAL, nao espantalho.
+    Sensibilidade (XAU take2): n=1->DSR 0.997; n=2->0.952; n=3->0.829; n=12->0.215.
+    Ou seja, a aprovacao do DSR depende inteiramente de quantas hipoteses foram
+    testadas — e 12 e honesto. A deflacao e grande porque os 12 Sharpes tem
+    variancia real (1 ganhador de sorte entre majors negativos): textbook-correto.
+    ALPHA NEGATIVO E REAL E NAO DEPENDE DO DSR: B&H XAU=+120.1% (ground truth,
+    close 1957.6->4309.3) vs setup +66.2% -> -53.9pp. O ouro PERDE MESMO pro
+    buy&hold. Esse gate sozinho ja reprova o XAU, com ou sem DSR.
+
+[7] DADOS Dukascopy  => PLAUSIVEIS E LIMPOS.
+    XAU 70826 barras (verdict diz 70826) 2023-06-15..2026-06-15 (1095 dias =
+    3.00 anos). monotonico=True, dups=0, OHLC-invalido=0, barras de sabado=0
+    (filtro de range-zero em data:113 remove fim-de-semana/feriado). Spacing:
+    70051 barras a 900s (15min exato) + 591 a 4500s (gaps intraday de baixa
+    liquidez) + ~150 rollovers de fim de semana. Majors idem (74588/74580).
+    NOTA: XAU tem 774 gaps >45min vs ~160 nos majors (ouro tem janelas finas
+    fora do horario US) — mas isto NAO sabota o sinal: cada gap so significa que
+    a sessao tem menos barras; a logica de sessao/CA/saida e robusta a buracos
+    (testado, 0 anomalias). 70k barras XAU e coerente (~75 barras uteis/dia).
+
+[8] REPRODUTIBILIDADE  => PERFEITA.
+    `uv run python -m simulation.fimathe_intraday --report-file /tmp/x` ->
+    diff contra data/fimathe_intraday_verdict.txt = VAZIO (identico). exit=0.
+    Todos os numeros-manchete (XAU take2: n=807, win 60.2%, +0.066/+0.065%,
+    Sh 1.50, +66.2%) reproduzidos exatamente por probe independente.
+
+[9] Alguma config (ativo x take x filtro) que PASSARIA e foi mascarada?  => NAO.
+    Varredura adversarial AMPLA (muito alem da grade do tribunal):
+      - 8 ancoras de sessao (UTCday, 22, 21, 19, 13, 10, 7, 3 UTC)
+      - 2 metodos de alvo (clone-da-borda vs clone-do-entry-real, este ultimo
+        MAIS fiel a "clona a altura a partir da ENTRADA" da spec)
+      - 2 takes x 2 filtros x 3 ativos
+      - ATE com CUSTO ZERO e desempate OTIMISTA (target-first)
+    RESULTADO: 0 (ZERO) configs passam DSR>=.95 E Sh>=1 E liq>0 E > B&H.
+    O melhor caso possivel (XAU, UTCday, take2, custo zero, otimista, alvo-do-
+    entry): Sh=1.31, DSR=0.952, tot=+59.6% — e AINDA perde do B&H por -60.5pp.
+    O buy&hold do ouro e o muro que nenhuma variante fiel transpoe.
+
+--------------------------------------------------------------------------------
+ACHADOS (nao-bloqueantes; nenhum inverte o veredito)
+--------------------------------------------------------------------------------
+
+[A] (INFORMATIVO, FORTE) — A ancora de sessao default favorece o XAU, nao o contrario.
+    O tribunal sempre usa CanalAberturaParams() => session_break_hour=None =>
+    sessao = dia-calendario UTC (canal_abertura.py:101-102). Isso ancora o "Canal
+    de Abertura" nas 4 velas de 00:00-00:45 UTC (madrugada asiatica) em 773 das
+    935 sessoes — NAO na abertura real do mercado (a spec diz domingo ~22 UTC; os
+    proprios dados comecam 22:00 UTC). Seria razoavel suspeitar que isso esconde
+    edge. NAO ESCONDE: testei ancorar a sessao na abertura real e em 7 outras
+    horas. A ancora dia-UTC e a MAIS LUCRATIVA para o XAU (take2 +66%); ancorar
+    em 22 UTC derruba para +5.3% (Sh 0.21); todas as outras sao piores ou
+    negativas. Conclusao: a escolha de sessao, se enviesa, enviesa A FAVOR do
+    edge — reforca o FALHA, nao o contradiz. (O parametro existe e e documentado
+    :80; o tribunal apenas nao o varre — recomendacao: varrer no futuro p/
+    transparencia, mas nao muda o veredito.)
+
+[B] (DESIGN, INFORMATIVO) — Alvos medidos da borda do CA (entry_ref), nao do open real.
+    canal_abertura.py:195-209 fixa entry_ref = borda rompida (top/bot) e mede
+    tp1/tp2 a partir DELA. Mas a entrada REAL e o open de k+1
+    (fimathe_intraday.py:127). EMPIRICO: o open de k+1 ja escorregou, em media,
+    +0.355 ranges (mediana +0.234; 98.9% adverso) na direcao do rompimento. Logo
+    o tp1 "1 range da borda" fica, na pratica, a ~0.65 range do preco de entrada
+    -> R:R comprimido contra a estrategia. Isso poderia ENCURTAR ganho. Testei a
+    alternativa fiel (clone a partir do ENTRY real, "target_from_entry"):
+      - melhora o DSR do XAU take2 de 0.215 -> 0.948 (quase passa!), MAS
+      - o retorno total CAI para +58.4% (alpha -61.6pp) -> reprova no gate B&H.
+    E esse 0.948 so existe com a ancora dia-UTC favoravel; na abertura real cai
+    p/ ~0.6. Ou seja: a nuance de design e legitima de discutir, mas corrigi-la
+    NAO ressuscita o edge — apenas troca qual criterio reprova. Honesto manter
+    o clone-da-borda (mais conservador no R:R medido).
+
+[C] (MENOR) — Desempate pessimista nunca morde neste dataset.
+    fimathe_intraday.py:142-159 resolve empate intrabar como STOP (pessimista).
+    EMPIRICO: 0/807 trades tem stop E alvo na mesma barra de saida (a caixa e
+    pequena e o stop fica ~2 ranges longe). Rodar OTIMISTA (target-first) da
+    resultado IDENTICO (Sh 1.50, +66.2%). Logo a conservacao aqui nao suprime
+    nada — nao e fonte de FALHA falsa.
+
+[D] (MENOR, observacao) — Robustez-spread-3x usa take2/base fixo (:378).
+    O bloco de robustez ao spread re-testa so a config (take2, base). E
+    suficiente p/ a tese (mostra que o veredito nao depende do spread), mas nao
+    varre take1/sem-sexta sob 3x. Nao-bloqueante: a varredura ampla [9] ja cobre
+    isso com custo ZERO (limite inferior do custo) e nada passa.
+
+--------------------------------------------------------------------------------
+CONCLUSAO
+--------------------------------------------------------------------------------
+O codigo e CORRETO e HONESTO. Procurei especificamente um bug que enterrasse
+injustamente a tecnica do usuario — sinal trocado, swap indevido, custo dobrado,
+alvo/stop curto, sessao mal cortada, DSR manipulado, dado furado — e NAO existe.
+
+O edge do XAU e BRUTO-positivo mas (a) reprovado por DSR honesto (n_trials=12 e a
+grade real) e, decisivamente, (b) perde do buy&hold do ouro por ~54-62pp em TODA
+variante fiel testada — incluindo as MAIS generosas (custo zero, desempate
+otimista, alvo clonado do entry, 8 ancoras de sessao). O "lucro" do setup no ouro
+e BETA capturado de um bull historico (+120%), nao alpha da entrada-no-rompimento.
+Os majors sao negativos ate no bruto. A FIMATHE mecanica, neste teste, e um filtro
+de beta, nao um gerador de alpha.
+
+A barra de aceitacao do projeto (DSR>=.95 E Sh_liq>=1 E liq>0 E > B&H) e dura e
+correta; o veredito FALHA e o resultado fiel dessa barra aplicada a dados limpos
+por um motor sem bug. ENCERRAMENTO JUSTO.
+
+Ressalvas honestas (nao mudam o veredito, mas valem registro p/ o usuario):
+  - O teste e da camada MECANICA pura (1 entrada/sessao no rompimento do CA). A
+    spec lista camadas discricionarias (antecipacao M1, virada-de-mao, subciclo
+    0a0, escolha de 1v2 niveis por win-streak, leitura de barra-elefante) que
+    NAO foram testadas — a spec mesma estima ~30% de discricionario. Este FALHA
+    e da geometria mecanica, nao prova que a operacao completa do Marcelo falha.
+  - O teste e por FECHAMENTO M15; sem dados M1 nao se pode reproduzir a
+    antecipacao intrabar (que entra ~1 barra mais cedo). Isso e uma aproximacao
+    HONESTA e conservadora (entra mais tarde, nunca mais cedo), mas e uma
+    aproximacao. Um teste em M1 mudaria os preenchimentos (provavelmente pouco,
+    dada a magnitude do gap medio, mas nao foi medido).
+  Nenhuma dessas ressalvas e um BUG nem reverte o FALHA da camada testada.
+================================================================================

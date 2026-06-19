@@ -1,0 +1,107 @@
+================================================================================================
+RISK PARITY (ciente de covariancia) vs 1/vol INGENUO — candidato a v2 do motor de beta
+================================================================================================
+================================================================================================
+VEREDITO — RISK PARITY (covariancia) vira v2, ou o 1/vol ingenuo FICA?
+================================================================================================
+(1) CABECA-A-CABECA (mesmo periodo, custo+financiamento):
+    [1/vol fica] 1x: RP Sharpe 1.23/Calmar 0.52/MaxDD -13.6%  vs  1/vol Sharpe 1.19/Calmar 0.51/MaxDD -13.5%
+           ΔSharpe +0.04 · ΔCalmar +0.00 · ΔCAGR +0.1% (RP +melhor no risco-ajustado)
+    [1/vol fica] 2x: RP Sharpe 0.97/Calmar 0.42/MaxDD -26.1%  vs  1/vol Sharpe 0.95/Calmar 0.42/MaxDD -25.9%
+           ΔSharpe +0.02 · ΔCalmar -0.00 · ΔCAGR +0.1% (RP +melhor no risco-ajustado)
+
+(2) ROBUSTEZ: RP bate o 1/vol em 0/12 combinacoes de lookback x shrinkage (0%).
+    -> RP NAO bate o 1/vol em NENHUMA celula da grade.
+
+(3) DECISAO:
+    *** O 1/vol INGENUO FICA. ***
+    A 1x o RP move o Sharpe em apenas +0.04 (de 1.19 p/ 1.23) — DENTRO da folga de ruido (+/-0.05).
+    O sinal nao e estavel entre lookbacks/shrinkage — empate-ruido, nao edge.
+    POR QUE (medido, nao assumido): (i) os pares redundantes da cesta (SPY/QQQ, TLT/IEF,
+    GLD/SLV, BTC/ETH) tem VOL parecida, entao equal-VOL (1/vol) ja chega quase no equal-
+    RISK (ERC) — ha pouco a de-duplicar; (ii) as correlacoes ENTRE classes sao baixas
+    (~0.22 media), entao a cesta ja e diversificada SEM a covariancia; (iii) a cov rolante
+    tem erro de estimacao (shrinkage LW medio ~0.30) que rouba o pouco de ganho teorico.
+    Confirmacao de sanidade: com shrinkage=100% o ERC COLAPSA exatamente no 1/vol (Sharpe
+    1.19=1.19) — prova de que a unica diferenca medida e a covariancia, e ela nao paga.
+    O 1/vol diagonal e mais simples, mais barato de estimar e JA auditado. Nao se troca.
+
+    NOTA: ambos usam a MESMA casca (teto cripto, escala vol-alvo, gross<=1, rebalance
+    mensal, .shift(1)) e o MESMO custo+financiamento. A UNICA diferenca medida e
+    1/vol diagonal vs ERC ciente de covariancia. Comparacao limpa.
+
+================================================================================================
+BARRA / PREMISSAS / HONESTIDADE
+================================================================================================
+BARRA HONESTA: Risk parity (ciente de covariancia) so VALE virar v2 se BATER o
+  1/vol INGENUO no risco-ajustado LIQUIDO DE CUSTO (Sharpe E/OU Calmar) de forma
+  ROBUSTA — nao em um unico lookback/shrinkage. Senao, FICA COMO ESTA: o 1/vol ja
+  e simples, barato de estimar e AUDITADO. Se ganhar, e CANDIDATO a v2 e exige
+  auditoria completa do Coder + paridade + cadeia de producao ANTES de substituir o
+  config vivo. NAO auto-promove.
+
+  RISK PARITY (NOVO): Equal Risk Contribution sobre a MATRIZ DE COVARIANCIA rolante
+  (lookback 60d) COM shrinkage Ledoit-Wolf (constant-correlation, numpy puro).
+  Solver ERC = coordinate descent ciclico (Griveau-Billion/Spinu, convergente).
+  1/vol INGENUO (PRODUCAO): importado de beta_portfolio.weights_disciplined
+  (use_gate=False) — peso ~ 1/vol_individual, IGNORA correlacoes. NAO reimplementado.
+  CASCA IDENTICA nos dois: teto cripto 5%/nome · escala p/ vol-alvo
+  10% a.a. · gross<=1 (base) · rebalance mensal · .shift(1) anti-look-ahead.
+  CUSTO+FINANCIAMENTO (importado de beta_v2, NAO editado): equities 3bps/lado, cripto
+  35bps/lado sobre |Δpeso|; financiamento 5.5% a.a. sobre o emprestado (gross-1)+
+  na comparacao alavancada (2x). SEM LOOK-AHEAD: cov de t usa retornos <= t-1; peso aplica em t+1.
+
+  PAINEL: 8 ativos, 1993-01-29..2026-06-15 (8401 dias). JANELA-CABECA a partir de 2004-11-18 (cesta diversificada).
+  SPY:1993-01-29→2026-06-15(8401)  QQQ:1999-03-10→2026-06-15(6859)  TLT:2002-07-30→2026-06-15(6008)  IEF:2002-07-30→2026-06-15(6008)  GLD:2004-11-18→2026-06-15(5426)  SLV:2006-04-28→2026-06-15(5064)  BTC-USD:2014-09-17→2026-06-15(2953)  ETH-USD:2017-11-09→2026-06-15(2159)
+
+================================================================================================
+(1a) CABECA-A-CABECA a 1.0x (sem alavancagem)
+================================================================================================
+  alocador                     |    CAGR | Sharpe | Sortino |   MaxDD | Calmar |       pior ano | gross
+  -----------------------------------------------------------------------------------------------------
+  RISK PARITY (cov) 1x         |   +7.0% |   1.23 |    1.73 |  -13.6% |   0.52 |   -10.1% (2022) |   76%
+  1/vol ingenuo (prod) 1x      |   +6.9% |   1.19 |    1.67 |  -13.5% |   0.51 |   -10.0% (2022) |   74%
+  buy&hold eq-weight 1x        |  +16.0% |   0.97 |    1.25 |  -38.8% |   0.41 |   -29.3% (2022) |  100%
+
+================================================================================================
+(1b) CABECA-A-CABECA a 2.0x (alavancagem de PRODUCAO, com financiamento real)
+================================================================================================
+  alocador                     |    CAGR | Sharpe | Sortino |   MaxDD | Calmar |       pior ano | gross
+  -----------------------------------------------------------------------------------------------------
+  RISK PARITY (cov) 2x         |  +11.0% |   0.97 |    1.38 |  -26.1% |   0.42 |   -19.9% (2022) |  151%
+  1/vol ingenuo (prod) 2x      |  +10.9% |   0.95 |    1.34 |  -25.9% |   0.42 |   -19.5% (2022) |  149%
+
+================================================================================================
+(2) ROBUSTEZ — RP variando lookback {60,126,252} x shrinkage {LW,0%,50%,100%} (a 1x)
+    O ganho do risk parity sobrevive aos parametros de covariancia, ou e fragil?
+================================================================================================
+  Referencia 1/vol ingenuo (1x): Sharpe 1.19 · Calmar 0.51 · MaxDD -13.5% · CAGR +6.9%
+
+  RP (lookback x shrink)     |    CAGR | Sharpe |   MaxDD | Calmar | Sh>1/vol? | Cal>1/vol?
+  -----------------------------------------------------------------------------------------
+  lb=60/LW-auto              |   +7.0% |   1.23 |  -13.6% |   0.52 |         ~ |          ~
+  lb=60/shrink=0%            |   +7.0% |   1.23 |  -13.7% |   0.51 |         ~ |          ~
+  lb=60/shrink=50%           |   +7.0% |   1.21 |  -13.6% |   0.51 |         ~ |          ~
+  lb=60/shrink=100%          |   +6.9% |   1.19 |  -13.5% |   0.51 |         ~ |          ~
+  lb=126/LW-auto             |   +6.9% |   1.22 |  -14.6% |   0.47 |         ~ |        nao
+  lb=126/shrink=0%           |   +6.9% |   1.22 |  -14.6% |   0.47 |         ~ |        nao
+  lb=126/shrink=50%          |   +6.8% |   1.20 |  -14.5% |   0.47 |         ~ |        nao
+  lb=126/shrink=100%         |   +6.7% |   1.17 |  -14.2% |   0.47 |         ~ |        nao
+  lb=252/LW-auto             |   +6.9% |   1.22 |  -15.0% |   0.46 |         ~ |        nao
+  lb=252/shrink=0%           |   +6.9% |   1.22 |  -15.1% |   0.46 |         ~ |        nao
+  lb=252/shrink=50%          |   +6.8% |   1.20 |  -14.9% |   0.46 |         ~ |        nao
+  lb=252/shrink=100%         |   +6.7% |   1.18 |  -14.7% |   0.46 |         ~ |        nao
+
+  DIAGNOSTICO 1 (erro de estimacao): shrinkage medio do Ledoit-Wolf (lookback 60d) = 0.30.
+  Em ~30% o LW joga a cov amostral fora rumo ao alvo de correlacao-constante — ela e
+  ruidosa o bastante p/ NAO ser confiavel a janela curta. (delta=0 -> cov limpa; 1 -> puro ruido.)
+
+  DIAGNOSTICO 2 (onde o ERC deveria ganhar): correlacoes DENTRO de classe (risco redundante
+  que o 1/vol IGNORA e o ERC desconta):
+    SPY/QQQ=0.92  TLT/IEF=0.91  GLD/SLV=0.80  BTC-USD/ETH-USD=0.77
+  Mesmo com pares 0.8-0.94 correlacionados, o ganho do ERC e ~zero: os pares redundantes
+  tem VOL parecida, entao equal-VOL (1/vol) ja chega quase no equal-RISK (ERC). E as
+  correlacoes ENTRE classes sao baixas -> a cesta ja e diversificada sem ajuda da covariancia.
+
+  Leitura da grade: 'Sh>1/vol?'/'Cal>1/vol?' = 'sim' em quase toda -> ganho robusto;
+  '~' (empate dentro de +/-0.05) ou viram com lookback/shrinkage -> NAO ha edge, e ruido.

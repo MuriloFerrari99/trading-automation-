@@ -1,0 +1,343 @@
+================================================================================
+RE-AUDITORIA ADVERSARIAL — CADEIA DE PRODUCAO DO BETA (PORTAO FINAL, RODADA 4)
+Auditor: O CODER (independente, read-only). Data: 2026-06-16 (clock UTC).
+Pergunta central: a simplificacao da raiz (NOVO-3 -> resolve_sleeve_nav) criou um
+bug novo, e e SEGURO ligar BETA_LIVE_ENABLED no paper AGORA?
+Metodo: NAO confiei na prosa do Executor nem nos testes dele. REPRODUZI cada
+correcao com o cache REAL (data/beta_cache, SPY 8401 barras ate 2026-06-15), o
+wiring REAL (_build_beta_guard, _BetaRebalanceOrchestrator, BetaRebalancer) e o
+estado REAL em disco (data/trading.sqlite). FakeBroker espelha a semantica do
+AlpacaBroker (equity = caixa + market value das posicoes; P&L incluido UMA vez —
+confirmado em broker/alpaca_broker.py:90-99).
+================================================================================
+
+VEREDITO: ***SEGURO LIGAR (paper) — COM 1 PRE-CONDICAO E 1 RECOMENDACAO.***
+
+A simplificacao da raiz FUNCIONOU. NOVO-3 (double-count) e NOVO-4 (stale em disco)
+estao CORRIGIDOS NA RAIZ e eu os reproduzi ponta a ponta. NAO encontrei regressao
+nova introduzida pela simplificacao no sizing, no drawdown, na isolacao de books,
+nem na interacao com o caminho vivo. O modo absoluto continua correto. A suite
+esta verde (364), agora COM testes que exercitam o caminho antes descoberto.
+
+O padrao das 3 rodadas anteriores ("cada fix criou regressao") NAO se repetiu
+desta vez: a simplificacao colapsou duas primitivas (resolve_sleeve_capital +
+beta_sleeve_nav) numa so CORRETA (resolve_sleeve_nav), e a fonte da regressao
+anterior (compor pct*equity com +P&L) foi REMOVIDA, nao remendada.
+
+A unica coisa que ainda impede a paridade com o backtest e o ITEM EM ABERTO
+(teto per-symbol vs IEF) — mas isso e PRE-EXISTENTE, nao foi tocado pela
+simplificacao, e NAO e perigoso p/ a conta (so trunca a fidelidade ao backtest no
+leg de bonds). Adjudico abaixo e dou o numero recomendado.
+
+--------------------------------------------------------------------------------
+RESUMO POR ITEM
+--------------------------------------------------------------------------------
+  [NOVO-3]  CORRIGIDO (reproduzido).   double-count eliminado na raiz; guard ve o
+            DD REAL 1x. pullback -15% NAO halta; -28/-29% HALTA no numero real.
+  [NOVO-4]  CORRIGIDO (reproduzido).   start<=0/None re-derivado do NAV do boot e
+            re-gravado; disco JA saneado (sem beta:* keys); gate diario ativo dia 1.
+  [TETO-IEF] EM ABERTO (pre-existente; pior do que o v3 disse). RECOMENDACAO:
+            subir BETA_MAX_PER_SYMBOL_PCT p/ 1.60 (160%) OU aceitar o clip e
+            documentar a divergencia (TE ~3.5%/a.a., CAGR -2.3pp). Numero abaixo.
+  [REGRESSAO NOVA] NENHUMA encontrada. Edge cases da simplificacao falham seguro.
+  [NOVO-1]  INTACTO (boot flat sadio).      [MF-4] INTACTO (isolacao c/ absoluto).
+  [PARIDADE] INTACTA bit-a-bit (0.0).       [FLAG OFF == LEGADO] INTACTO.
+  [SUITE]   364 passed, 0 skip/xfail (53 no beta).
+
+================================================================================
+PARTE A — NOVO-3 CORRIGIDO NA RAIZ (reproduzido, nao so lido)
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:175-197 (resolve_sleeve_capital, agora
+devolve None em paper so-beta) ; :221-254 (resolve_sleeve_nav, a NOVA primitiva
+unica) ; consumida em main.py:140 (boot), main.py:224 (update vivo) e
+beta_rebalancer.py:504 (sizing em compute_plan).
+
+A SIMPLIFICACAO (a raiz, nao um remendo):
+  - resolve_sleeve_capital (bt:175-197): em paper so-beta (sem BETA_SLEEVE_CAPITAL
+    absoluto) agora retorna None. O ramo "pct * equity" — a FONTE do double-count
+    do NOVO-3 — foi REMOVIDO do codigo. So devolve numero quando ha um caixa
+    ABSOLUTO e FIXO (BETA_SLEEVE_CAPITAL > 0).
+  - resolve_sleeve_nav (bt:221-254): UMA primitiva, a unica base de NAV do guard
+    e do sizing:
+      * capital absoluto setado  -> NAV = caixa_fixo + P&L (P&L 1x; caixa nao
+        inclui P&L).
+      * DEFAULT (paper so-beta)  -> NAV = broker.get_account().equity DIRETO. O
+        equity da conta JA e o NAV correto e ja contem o P&L UMA vez. SEM somar
+        P&L, SEM pct*equity.
+
+PERGUNTA DO BRIEFING (respondida): "em paper so-beta o NAV == equity DIRETO (P&L
+uma vez, sem pct*equity)?" -> SIM. Confirmado: bt:249-251 retorna
+Decimal(str(broker.get_account().equity)).
+
+REPRODUCAO 1 — paper so-beta, DEFAULT, com BETA_SLEEVE_CAPITAL_PCT=1.0 setado
+(o velho default; deve ser IGNORADO agora):
+    settings.sleeve_capital = 0 ; sleeve_capital_pct = 1.0 (ignorado)
+    flat:                  equity=100000  cap=None  nav=100000   nav-eq=0
+    comprou 500 SPY@100:   equity=100000  cap=None  nav=100000   nav-eq=0  (P&L 0)
+    SPY -> 110 (+10%):     equity=105000  cap=None  nav=105000   nav-eq=0
+  <-- no v3, este ultimo passo dava nav=110000 (P&L duplicado). AGORA nav==equity.
+  O P&L (+5000) entra UMA vez. BETA_SLEEVE_CAPITAL_PCT NAO afeta mais o NAV.
+
+REPRODUCAO 2 — o lado perigoso (perda nao mais distorcida p/ disparar cedo):
+  Sleeve 100% investido (1000 SPY@100), SPY cai -30% (-> 70):
+    TRUE account equity = 70000 (DD real -30%)
+    resolve_sleeve_nav  = 70000  == equity        (v3 dava 40000 => -60% lido)
+    DD lido pelo guard  = -30.00% (REAL), nao -60%.
+
+REPRODUCAO 3 — o drawdown 1x atraves do GUARD REAL (o cenario do briefing).
+Queda LENTA entre dias (peak global 100000 persiste; start por dia = NAV de
+abertura, entao o gate DIARIO nao mascara; so o gate de MAX-DD -28% esta em jogo).
+Reproduzido via _build_beta_guard real + estado persistido real:
+    -3% cum  -> DD lido -3.0%  -> halted=False
+   -10% cum  -> DD lido -10.0% -> halted=False
+   -15% cum  -> DD lido -15.0% -> halted=False   <-- v3: lia -30% e HALTAVA. FIX.
+   -27% cum  -> DD lido -27.0% -> halted=False   (abaixo do limite)
+   -28% cum  -> DD lido -28.0% -> HALT "max drawdown atingido (-28.00%)"
+   -29% cum  -> DD lido -29.0% -> HALT "max drawdown atingido (-29.00%)"
+  => pullback -15% NAO halta; tombo -28/-29% HALTA no numero REAL (1x). Exato.
+
+OS 3 CALL SITES (com P&L != 0, SPY +10%, equity da conta = 105000):
+    [boot   main.py:140 ] _build_beta_guard.start_equity = 105000  == equity
+    [update main.py:224 ] resolve_sleeve_nav(broker)      = 105000  == equity
+    [sizing bt:504      ] compute_plan.plan.equity        = 105000  == equity
+  => TODOS os 3 contam o P&L UMA vez. Nenhum double-count residual.
+
+CONSISTENCIA boot(com settings) vs update/sizing(sem settings): o boot passa
+settings=bs; update/sizing chamam get_beta_guard_settings() fresco. Como leem o
+MESMO env, concordam. Reproduzido:
+    paper so-beta: boot=update=sizing=105000 (== equity).
+    absoluto 80k : boot=update=sizing=85000  (= 80k + P&L 5k).
+
+STATUS NOVO-3: CORRIGIDO NA RAIZ. Reproduzido com guard/wiring/cache reais.
+
+================================================================================
+PARTE B — NOVO-4 CORRIGIDO (reproduzido) + DISCO JA SANEADO
+================================================================================
+ARQUIVOS: main.py:155-164 (start<=0 ou None -> re-deriva do NAV do boot e re-grava;
+NAO coage p/ 1) ; estado real data/trading.sqlite.
+
+O FIX (main.py:156-164): se o start persistido for None OU <= 0, grava o NAV do
+boot e usa-o como start (re-derivacao). So o fallback p/ Decimal("1") (main.py:175)
+permanece, e SO p/ o caso degenerado de NAV de boot == 0 (conta sem caixa nem
+posicoes), onde o gate diario e inerte por nao haver capital — nao por coercao.
+
+DISCO SANEADO (dump REAL de data/trading.sqlite que eu rodei AGORA):
+    ladder_anchor:MSFT          = '398.89'
+    risk_peak_equity            = '100000'
+    risk_start_equity:2026-06-15= '99999.92'
+    risk_start_equity:2026-06-16= '100000'
+    beta:* keys                 = NONE  <-- SANEADO. Sem beta:risk_start_equity='0',
+                                            sem beta:risk_peak_equity fantasma.
+  => no go-live, _build_beta_guard cai no ramo None (1o boot do dia) e grava o NAV
+     correto. O residuo que o v3 reportou NAO existe mais.
+
+REPRODUCAO (tratamento de start persistido invalido, via _build_beta_guard real):
+    persisted '0'      -> guard.start_equity=100000 ; disco re-escrito=100000 (NAO 1)
+    persisted '-500'   -> 100000 ; disco=100000
+    persisted None     -> 100000 ; disco=100000
+    persisted '123456' -> 123456 ; disco=123456     (valor valido PRESERVADO no restart)
+
+REPRODUCAO (a consequencia — gate diario ativo no 1o dia):
+  Com residuo stale '0' semeado, boot flat 100k, depois -10% intradia:
+    boot: start=100000 halted=False
+    -10% intradia: nav=90000 -> HALT "daily loss limit atingido (-10.00%)".
+  => o gate de -6% NAO esta mais neutralizado. Reproduzido tambem no MODO ABSOLUTO
+     (stale 0 -> re-derivado p/ 100000 ; -7% intradia -> HALT -7.00%).
+
+STATUS NOVO-4: CORRIGIDO + disco saneado. Reproduzido nos dois modos.
+
+================================================================================
+PARTE C — REGRESSAO NOVA? (a prioridade nº1 do briefing) — NENHUMA ENCONTRADA
+================================================================================
+Procurei ativamente um bug introduzido pela simplificacao em sizing, drawdown,
+isolacao de books e na interacao com o caminho vivo. Edge cases reproduzidos:
+
+  (1) equity ilegivel (get_account lanca) -> resolve_sleeve_nav = 0 (bt:252-254);
+      compute_plan aborta com nota "equity <= 0 — rebalance abortado (fail-safe)"
+      (bt:520-522). Sem crash. Fail-safe.
+  (2) flat so-caixa (sem posicoes) -> NAV = caixa (positivo) -> guard sadio.
+  (3) conta zerada (sem caixa nem posicoes) -> NAV = 0 -> guard inerte (degenerado,
+      o unico caso onde o fallback p/ 1 atua; sem capital nao ha o que proteger).
+  (4) get_positions lanca -> beta_sleeve_pnl devolve 0 (bt:158-160); NAV cai no
+      equity da conta (paper) ou caixa+0 (absoluto). Degrada seguro.
+  (5) BetaRebalancer(sleeve_capital=80000) injetado com config=paper so-beta ->
+      usa o caixa injetado (bt:498-500): plan.equity = 85000 (80k + P&L 5k). A
+      injecao tem precedencia sobre o config, como esperado.
+  (6) restart apos -30% real (peak persiste 100k, novo dia) -> HALT correto.
+  (7) boot flat: guard.update(nav) com nav==start==peak (main.py:183) NAO engaja
+      halt e NAO move o peak errado (peak persistido = 100000).
+
+MODO ABSOLUTO (BETA_SLEEVE_CAPITAL>0) AINDA CORRETO (sem double-count):
+  Conta com book de ACOES (AAPL 200k, fora do universo) + BETA (SPY 100k),
+  BETA_SLEEVE_CAPITAL=100000:
+    NAV sleeve = 100000 (P&L 0) ; equity total da conta = 300000.
+    AAPL -50%  -> NAV sleeve = 100000 (ISOLADO; nao mexe).      [MF-4 OK]
+    SPY  -30%  -> NAV sleeve = 70000 = caixa_fixo 100k + P&L(-30k) (1x). DD -30%.
+    SPY  +20%  -> NAV sleeve = 120000 = 100k + 20k (1x).
+  => caixa fixo + P&L, sem double-count. Isola o sleeve do book de acoes.
+
+sleeve_capital_pct DEPRECATED NAO DIRIGE MAIS NADA: grep em todo o codigo de
+producao (nao-teste) nao acha NENHUM consumidor de sleeve_capital_pct /
+BETA_SLEEVE_CAPITAL_PCT alem da definicao em config/risk.py:129 (comentada como
+deprecated). Reproduzido: setar BETA_SLEEVE_CAPITAL_PCT=1.0 (ou 0.4) NAO altera o
+NAV (resolve_sleeve_capital devolve None do mesmo jeito). NEUTRALIZADO de fato.
+
+STATUS REGRESSAO: NENHUMA. A simplificacao e mais simples E mais correta que a
+versao anterior; os caminhos de falha degradam para "inerte/abortado", nunca para
+um halt fantasma ou um double-count.
+
+================================================================================
+PARTE D — O ITEM EM ABERTO: TETO PER-SYMBOL (60%) vs PESO DO IEF (e dos demais)
+================================================================================
+ARQUIVOS: config/risk.py:101 (BETA_MAX_PER_SYMBOL_PCT default 0.60) ;
+risk/portfolio_guard.py:73-77 (can_open veta peso-alvo > teto) ;
+beta_rebalancer.py:564-569 (BUY que aumenta exposicao passa por can_open).
+
+Este item NAO foi tocado pela simplificacao (e pre-existente, ja notado como nota
+de fidelidade no v3). MAS, ao adjudicar com os numeros REAIS, ele e BEM PIOR do
+que o v3 fez parecer: nao e "o IEF as vezes passa de 60%" — e que o teto de 60%
+CLIPA A OPERACAO NORMAL na MAIORIA dos dias, nao so uma anomalia.
+
+(a) PESO-ALVO MAXIMO POR SIMBOLO na historia REAL (8401 barras, L=1.5x, via o
+    MESMO production_weight_frame do backtest):
+        SPY      max 1.5000 (150.0%)   <-- = a alavancagem L inteira num so nome
+        IEF      max 1.5000 (150.0%)   <-- idem
+        GLD      max 1.1105 (111.1%)
+        QQQ      max 0.7239 ( 72.4%)
+        TLT      max 0.6763 ( 67.6%)
+        SLV      max 0.2170 ( 21.7%)
+        BTC-USD  max 0.0750 (  7.5%)   (capado 5%/nome DENTRO dos pesos; *1.5 lev)
+        ETH-USD  max 0.0375 (  3.7%)
+    O vol-target + hedge condicional CONCENTRA ate 150% (a alavancagem inteira)
+    num unico ativo de baixa vol em regimes extremos (SPY em bull forte; IEF/TLT
+    em fuga p/ qualidade). O gross (soma|w|) nunca passa de ~1.50x, mas UM leg
+    sozinho chega a 150%.
+    Distribuicao do "maior leg do dia" (max sobre simbolos): p50=0.623, p90=1.289,
+    p95=1.500. Ou seja, NUM DIA TIPICO o maior leg JA passa de 60% (mediana 62.3%).
+    Hoje (asof 2026-06-15): IEF 0.6782 (67.8%), SPY 0.260, QQQ 0.197, GLD 0.140.
+    O nivel de hoje (67.8%) e o percentil ~80% historico do IEF — nada anomalo.
+
+(b) O GUARD CLIPA EM PRODUCAO? SIM — reproduzido com o cache real, asof de hoje,
+    conta flat 100k, guard do beta REAL (per-symbol 60%):
+        target: IEF 67.8% | SPY 26.0% | QQQ 19.7% | GLD 14.1%
+        intents gerados: BUY SPY, BUY QQQ, BUY GLD   (3)
+        BLOQUEADOS:  IEF (exposicao por simbolo excedida (67.82% > 60.00%))  (1)
+    => o leg de IEF (o MAIOR alvo de hoje) e VETADO. A carteira viva fica com IEF
+       em 0% vs 67.8% no backtest. O capital liberado NAO e re-alocado em outro
+       ativo (can_open so VETA o BUY) — fica em CAIXA. O book vivo nasce
+       SISTEMATICAMENTE SUB-INVESTIDO no leg dominante.
+
+    Frequencia: com teto 60%, ALGUM leg-equity e clipado em 54.8% das datas. Com
+    70% -> 36.7% ; 75% -> 32.8% ; 80% -> 29.8% ; 100% -> 17.0% ; 150% -> 0.0%.
+
+    IMPACTO no track record (carteira capada vs backtest auditado, retornos diarios
+    reais, leg clipado fixado no teto e o resto em caixa):
+        SEM cap (backtest) : CAGR 12.65% | Sharpe 1.09 | MaxDD -18.5% |   TE  -
+        cap 60%            : CAGR 10.37% | Sharpe 1.07 | MaxDD -16.4% | TE 3.53%/a
+        cap 75%            : CAGR 11.00% | Sharpe 1.07 | MaxDD -17.4% | TE 2.69%/a
+        cap 80%            : CAGR 11.15% | Sharpe 1.07 | MaxDD -17.7% | TE 2.44%/a
+        cap 100%           : CAGR 11.68% | Sharpe 1.07 | MaxDD -18.4% | TE 1.58%/a
+    => MATERIAL. O teto 60% custa ~2.3pp de CAGR/ano e gera tracking error de
+       ~3.5%/ano contra o backtest — exatamente a serie auditada que o track
+       record deveria reproduzir p/ embasar AUM. NAO e cosmetico.
+
+(c) RECOMENDACAO (NUMERO): subir BETA_MAX_PER_SYMBOL_PCT para 1.60 (160%).
+    Justificativa: o peso-alvo MAXIMO legitimo de QUALQUER simbolo na historia
+    inteira e 1.50 (= a alavancagem L do produto concentrada num so nome). Um teto
+    de 1.60 fica ACIMA disso com folga, entao o guard so dispara em ANOMALIA REAL
+    (um peso computado > a alavancagem = bug de calculo / pre-process corrompido),
+    e NUNCA clipa operacao normal -> a paridade com o backtest e preservada
+    (TE -> 0). O cripto continua capado em 5%/nome DENTRO dos pesos (independe do
+    guard). A defesa de risco REAL e o DD-halt (-28%) + daily (-6%), nao o
+    per-symbol (que aqui so existe p/ pegar lixo).
+    OBSERVACAO sobre a sugestao "75-80%" do briefing: 75-80% NAO resolve — ainda
+    clipa ~30% das datas (a mediana do maior leg ja e 62%). Para o guard so pegar
+    anomalia, o teto TEM de ficar acima de 150%. Por isso 1.60.
+
+    ALTERNATIVA (se nao quiser mexer no guard): aceitar o clip e DOCUMENTAR que a
+    serie viva e uma versao "per-symbol-capped a 60%" do produto (CAGR ~10.4%,
+    TE 3.5%/a) — NAO o backtest auditado. Eu NAO recomendo isso p/ um track record
+    que vai embasar AUM, porque o numero divulgado deixaria de ser o auditado.
+
+    NOTA DE CALIBRACAO ERRADA: o comentario em config/risk.py:84-86 justifica o
+    60% dizendo "TLT/IEF pode pesar bastante via 1/vol; com 1.5x pode passar de
+    20%". A premissa subestima em ~90 pontos percentuais: o leg pode chegar a 150%,
+    nao "passar de 20%". O 60% foi calibrado contra uma intuicao errada do tamanho
+    do leg de bonds.
+
+================================================================================
+PARTE E — INTACTOS (verificado nesta rodada, nao so lido)
+================================================================================
+[OK] NOVO-1 boot flat: conta flat 100k, zero posicoes do beta -> guard nasce
+     trading_halted=False, halt_reason=None, start=100000. Restart flat: nao
+     re-halta. (main.py:155-183 reproduzido.)
+[OK] MF-4 isolacao (modo ABSOLUTO): AAPL -50% (fora do universo) NAO mexe no NAV
+     do sleeve; SPY -30% mexe (= -30% real). Keys proprias beta:risk_* (config/
+     risk via _build_beta_guard usa start_key/peak_key com prefixo 'beta:').
+     RESSALVA (trade-off DOCUMENTADO, nao regressao): no modo DEFAULT (paper
+     so-beta), o NAV = equity TOTAL da conta; se o book de ACOES dividir a MESMA
+     conta paper, o guard do beta ve o P&L das acoes tambem (AAPL -50% derruba o
+     NAV de 300k->200k). A isolacao REAL exige BETA_SLEEVE_CAPITAL absoluto. Para
+     um paper SO-BETA puro (sem acoes na conta) — o caso de go-live default — isto
+     e correto. Ver PRE-CONDICAO no veredito final.
+[OK] PARIDADE peso vivo == backtest BIT-A-BIT: max|erro| = 0.000e+00 em 1688
+     amostras (target_weights_for_date vs production_weight_frame.loc[asof]).
+     SEM look-ahead: perturbar a ultima barra do painel nao muda o asof anterior
+     (delta 0.0).
+[OK] FLAG OFF == LEGADO (end-to-end): build_app -> LocalOrchestrator (nao o
+     wrapper); monitor.on_schedule_start = None; run_beta_rebalance_cycle ->
+     {enabled:False}, broker.submitted=0; schedule_eod_capture/schedule_panel_
+     refresh -> False com 0 jobs; refresh_production_panel -> {refreshed:False}.
+[OK] SUITE: 364 passed, 0 skip/xfail (53 no beta). Os GAPS do v3 foram fechados —
+     agora HA testes que exercitam o caminho antes descoberto:
+       test_novo3_guard_sees_real_1x_drawdown_default_pct (bt_test:1153)
+       test_novo3_normal_pullback_minus15_does_not_halt   (bt_test:1167)
+       test_novo3_real_crash_minus29_halts_via_dd_gate    (bt_test:1200)
+       test_novo3_single_day_crash_trips_daily_gate...    (bt_test:1235)
+       test_novo3_sizing_default_pct_uses_account_equity..(bt_test:1259)
+       test_novo4_stale_zero_start_is_rederived_not_coerced (bt_test:1289)
+       test_novo4_daily_gate_active_on_day1_despite_stale_zero (bt_test:1315)
+     Conferi que NAO sao tautologicos: assertam nav==equity, dd==real, gate em -6%
+     (nao -12%), e stale 0 -> re-derivado 100000 + chave saneada.
+[NOTA] Cripto: alvo BTC/ETH continua baixo (cap 5%/nome * 1.5x = 7.5% max), e a
+     normalizacao de simbolo (BTCUSD->BTC/USD em alpaca_broker.py:113-127) ja foi
+     conferida em rodadas anteriores. Smoke-test de 1 ordem de cripto antes de o
+     vol-target alocar continua valendo (latente, nao bloqueia).
+
+================================================================================
+VEREDITO FINAL
+================================================================================
+***SEGURO LIGAR BETA_LIVE_ENABLED no paper.*** A simplificacao da raiz corrigiu
+NOVO-3 e NOVO-4 sem introduzir regressao. Reproduzi com cache/wiring/DB reais:
+  - NOVO-3: NAV == equity da conta em paper so-beta (P&L 1x); pullback -15% NAO
+    halta, -28/-29% HALTA no numero REAL. Double-count eliminado na raiz.
+  - NOVO-4: start<=0/None re-derivado do NAV (nao coagido p/ 1); disco JA saneado
+    (sem beta:* keys); gate diario ativo no 1o dia.
+  - Modo absoluto correto (caixa fixo + P&L 1x); sleeve_capital_pct neutralizado;
+    nenhuma regressao nos edge cases (todos falham seguro); flag OFF == legado;
+    paridade bit-a-bit; 364 testes verdes.
+
+DUAS condicoes p/ que o track record gravado seja DEFENSAVEL como baseline de AUM:
+
+  [PRE-CONDICAO — operacional, nao de codigo] Ligar em paper SO-BETA puro: a conta
+  paper usada NAO deve carregar tambem o book de ACOES no modo DEFAULT, senao o
+  guard do beta mede DD sobre o equity total (acopla os books). Se for coexistir
+  com acoes, setar BETA_SLEEVE_CAPITAL absoluto = caixa do paper (ai o sleeve fica
+  isolado, reproduzido OK). Para gravar o baseline limpo, o mais simples e uma
+  conta paper dedicada ao beta (default), e o NAV == equity e exato.
+
+  [RECOMENDACAO — p/ paridade com o backtest] Subir BETA_MAX_PER_SYMBOL_PCT de
+  0.60 para 1.60 ANTES de gravar a serie. Com 60%, o leg de IEF de HOJE (67.8%) e
+  VETADO e o book nasce sub-investido; a serie viva diverge do backtest em
+  ~3.5%/ano de TE e -2.3pp de CAGR — ou seja, o numero gravado NAO seria o
+  auditado. Com 1.60 o guard so pega anomalia (peso > a propria alavancagem) e a
+  paridade e preservada. Se preferir NAO mexer no guard, e LICITO ligar mesmo
+  assim — mas entao documente que a serie e a versao "capped a 60%", nao o
+  backtest. Esta recomendacao NAO e um bloqueador de SEGURANCA (o clip e
+  conservador p/ a conta: pra-cima de cautela, fica sub-investido); e um requisito
+  de FIDELIDADE do track record.
+
+Em resumo: e DEFENSAVEL ligar em paper agora. Recomendo fortemente aplicar a
+RECOMENDACAO (teto 1.60) antes de tratar a serie gravada como o track record
+oficial; sem ela, a serie e segura mas NAO bate com o backtest no leg de bonds.
+================================================================================

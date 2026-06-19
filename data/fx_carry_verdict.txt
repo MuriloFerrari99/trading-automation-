@@ -1,0 +1,66 @@
+====================================================================================================
+TRIBUNAL DE FX CARRY (G10) — long juro alto / short juro baixo, vs USD
+====================================================================================================
+
+DADOS: REAIS. FX spot mensal (yfinance) + juros 3m interbank OECD (FRED, sem chave).
+  Proxy: carry = diferencial de juro 3m / 12 (CIP segura bem em G10). Sem look-ahead:
+  sinal de t usa carry/vol de t-1; retorno realizado em t.
+CUSTO: base 2bps/lado, ESTRESSADO 4bps/lado sobre o turnover. Sizing por vol (alvo 10%/ano, vol de t-1).
+
+VEREDITO (barra pre-registrada): PASSA so se DSR>=0.95 (n_trials honesto) E Sharpe
+  liq robusto E (bate USD/buy&hold OU diversifica c/ corr BAIXA ao SPY) E robusto OOS
+  E unwind sobrevivivel.
+
+----------------------------------------------------------------------------------------------------
+VARIANTES TESTADAS (todas contam no n_trials do DSR):
+----------------------------------------------------------------------------------------------------
+            variante  meses  Sharpe   CAGR%   vol%   MaxDD%  turnov  corrSPY
+----------------------------------------------------------------------------
+         LS_top1_vol    252    0.11    0.50  13.28   -46.07    0.23     0.45
+         LS_top1_raw    264    0.17    1.35  11.80   -46.56    0.23     0.50
+   LONGONLY_top1_vol    252   -0.04   -1.15  11.53   -35.47    0.20     0.55
+   LONGONLY_top1_raw    264    0.16    1.28  12.56   -33.87    0.20     0.58
+         LS_top2_vol    252    0.29    2.95  12.63   -32.22    0.15     0.44  <== PRIMARIA
+         LS_top2_raw    264    0.27    2.04   8.95   -34.90    0.15     0.50
+   LONGONLY_top2_vol    252    0.02   -0.36  11.31   -37.99    0.08     0.56
+   LONGONLY_top2_raw    264    0.15    1.03  11.16   -32.91    0.08     0.61
+         LS_top3_vol    252    0.23    2.02  12.07   -30.84    0.10     0.48
+         LS_top3_raw    264    0.29    1.85   7.11   -27.37    0.10     0.50
+   LONGONLY_top3_vol    252   -0.03   -1.02  11.45   -43.80    0.06     0.57
+   LONGONLY_top3_raw    264    0.11    0.56  10.28   -35.90    0.06     0.63
+
+Benchmark USD (cash, sleeve sem risco) ~ 0% real; SPY buy&hold: Sharpe=0.81 CAGR=11.24%
+
+====================================================================================================
+TRIBUNAL ESTATISTICO sobre a PRIMARIA (LS_top2_vol), custo ESTRESSADO:
+====================================================================================================
+  n_obs=252  n_trials(honesto)=12
+  Sharpe_anual = 0.291  (obstaculo data-snooping = 0.370)
+  PSR = 0.905   DSR = 0.361   (barra DSR>=0.95)
+  skew = -0.25  kurtose = 8.48  (carry: skew NEGATIVO esperado)
+  PBO (CSCV) = 0.258   (barra < 0.5; quanto menor, melhor)
+
+OOS (split temporal 60/40):
+  IS  : Sharpe=0.42  CAGR=4.74%
+  OOS : Sharpe=0.09  CAGR=0.33%
+
+STRESS — UNWIND do carry em RISK-OFF (pior decil de meses do SPY):
+  retorno medio do carry em risk-off = -3.08%/mes (vs +0.31%/mes no geral)
+  pior mes isolado do carry = -19.51%
+  carry no PIOR mes do SPY = -10.13%
+  downside capture vs SPY (risk-off) = 0.40
+  Leitura: carry tem cauda esquerda (desaba junto com risco). Se downside_capture > 0
+  e alto, o carry AMPLIFICA o risk-off (o classico unwind) — pessimo p/ diversificar.
+
+====================================================================================================
+VEREDITO FINAL:
+====================================================================================================
+  ##############################################################################
+  #  REPROVADO — FX carry (G10) NAO cumpre a barra de graduacao                #
+  ##############################################################################
+  - DSR=0.361 < 0.95 (Sharpe nao supera o obstaculo de data-snooping)
+  - Sharpe liq estressado=0.29 < 0.8
+  - OOS fraco (Sharpe OOS=0.09)
+  - nao diversifica nem bate buy&hold (corrSPY=0.44, Sharpe=0.29 vs SPY 0.81)
+  - unwind perigoso (pior mes -19.5%)
+

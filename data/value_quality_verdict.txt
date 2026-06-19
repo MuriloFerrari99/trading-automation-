@@ -1,0 +1,42 @@
+==============================================================================
+TRIBUNAL — VALUE + QUALITY (fatores fundamentalistas)  [R&D isolado]
+==============================================================================
+data_status: real
+janela: 2023-03-31 -> 2026-06-17  (3.2 anos, 806 dias)
+tickers c/ fundamentos: 44 | rebalances trimestrais: 14
+n_trials (honesto): 12 | PBO: 0.171
+
+Benchmarks: EW Sharpe=1.74 CAGR=24.63% | SPY Sharpe=1.388 CAGR=21.84%
+
+Configs (custo ESTRESSADO 2x, ordenado por Sharpe):
+                      name  sharpe_stress  sharpe_base   dsr   cagr  maxdd  corr_spy  n_obs
+  quality_long_only_tercil          1.858        1.859 0.949  0.301 -0.190     0.931    806
+ quality_long_only_quartil          1.827        1.828 0.946  0.324 -0.211     0.917    806
+   combo_long_only_quartil          1.777        1.780 0.930  0.300 -0.194     0.880    806
+   value_long_only_quartil          1.751        1.753 0.917  0.322 -0.150     0.644    806
+    combo_long_only_tercil          1.725        1.727 0.919  0.275 -0.176     0.894    806
+    value_long_only_tercil          1.701        1.702 0.902  0.295 -0.164     0.673    806
+ quality_long_short_tercil          1.014        1.019 0.554  0.057 -0.090     0.274    806
+quality_long_short_quartil          0.658        0.662 0.311  0.044 -0.087     0.288    806
+   combo_long_short_tercil          0.497        0.502 0.219  0.026 -0.072     0.113    806
+  combo_long_short_quartil          0.300        0.305 0.129  0.018 -0.117     0.085    806
+   value_long_short_tercil          0.093        0.096 0.067  0.004 -0.143    -0.279    806
+  value_long_short_quartil          0.006        0.009 0.049 -0.004 -0.169    -0.272    806
+
+MELHOR config: quality_long_only_tercil
+  Sharpe(stress)=1.858  DSR=0.949  CAGR=30.13%  MaxDD=-18.97%  corr_SPY=0.931
+
+VEREDITO: FALHA
+Barra: DSR>=0.95 E Sharpe_stress>=0.8 E (bate EW/SPY OU diversifica corr<0.5) E PBO<0.5 E >=1ano
+------------------------------------------------------------------------------
+TESTE DE ALPHA (retorno ativo vs equal-weight) — o que realmente importa:
+  quality_long_only_tercil : active-vs-EW ann_sharpe=0.76  t(media)=1.36  corrSPY=0.93
+  value_long_only_quartil  : active-vs-EW ann_sharpe=0.65  t(media)=1.16  corrSPY=0.64
+  quality_long_short_tercil: active-vs-EW ann_sharpe=-1.25 t(media)=-2.23 corrSPY=0.27
+
+DIAGNOSTICO: o Sharpe alto das variantes long-only e BETA de bull (corr_SPY~0.93),
+capturado igualmente pelo equal-weight. O retorno ATIVO sobre o EW NAO e significativo
+(t=1.36 < 2). As variantes market-neutral (alpha de fator puro) sao fracas ou NEGATIVAS.
+Melhor DSR=0.949 fica ABAIXO de 0.95. Nao ha alpha fundamentalista demonstravel no dado
+disponivel. Limitacao de dado: fundamentos PIT gratis (yfinance trim+anual) so dao ~3.2
+anos uteis -> N curto p/ o tribunal; conclusao do alpha NAO depende disso (active t<2).

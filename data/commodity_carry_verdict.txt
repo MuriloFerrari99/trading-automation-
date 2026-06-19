@@ -1,0 +1,61 @@
+==============================================================================
+TRIBUNAL — COMMODITY CARRY / ROLL YIELD
+==============================================================================
+data_status: limited (term structure point-in-time NAO e gratis;
+  roll yield aproximado via ETFs: roll-method spread (DBO-USO), carry-momentum
+  cross-seccional, e carry-enhanced USCI vs naive DBC/GSG/DJP)
+
+Melhor config (cenario ESTRESSADO 2x): carryXS_long_lb12_k3
+Periodo: 2007-05-31..2026-06-30  | n=230 meses
+n_trials (honesto): 25
+
+METRICAS (liquidas, cenario estressado):
+  Sharpe anual : 0.315
+  CAGR         : +4.81%
+  MaxDD        : -59.44%
+  Corr c/ SPY  : 0.365
+
+TRIBUNAL ANTI-OVERFITTING:
+  DSR  : 0.2604  (barra >= 0.95)  FALHA
+  PSR  : 0.9123
+  PBO  : 0.528  (barra < 0.5)
+  obstaculo data-snooping (Sharpe anual): 0.465
+
+BENCHMARKS (mesmo periodo):
+  Sharpe estrategia : 0.315
+  Sharpe USCI (carry-enhanced BH): 0.341
+  Sharpe melhor naive (DBC/GSG/DJP): 0.176
+  Sharpe SPY        : 0.738
+  bate buy&hold? False   diversifica (corr<0.3 & sharpe>0.3)? False
+
+PREMIO DE CARRY 'PURO E GRATIS' (USCI carry-enhanced vs cestas naive):
+  USCI vs DBC: Sharpe 0.34 vs 0.23 | CAGR +4.0% vs +2.5% | n=190m
+  USCI vs GSG: Sharpe 0.34 vs 0.13 | CAGR +4.0% vs +0.4% | n=190m
+  USCI vs DJP: Sharpe 0.34 vs 0.14 | CAGR +4.0% vs +0.9% | n=190m
+
+TODAS AS CONFIGS (Sharpe anual estressado, ranqueadas):
+  carryXS_long_lb12_k3         +0.315
+  carryXS_LS_lb12_k3           +0.248
+  carryXS_long_lb12_k4         +0.213
+  carryXS_long_lb6_k4          +0.211
+  carryXS_long_lb6_k3          +0.181
+  carryXS_LS_lb12_k4           +0.133
+  carryXS_long_lb9_k3          +0.131
+  carryXS_long_lb6_k5          +0.124
+  carryXS_LS_lb6_k4            +0.104
+  carryXS_LS_lb9_k3            +0.088
+  carryXS_long_lb12_k5         +0.084
+  carryXS_long_lb9_k4          +0.083
+  carryXS_LS_lb6_k3            +0.069
+  carryXS_LS_lb12_k5           +0.047
+  rollTiming_WTI_lb6           +0.017
+  rollTiming_WTI_lb12          +0.002
+  rollTiming_WTI_lb3           -0.006
+  carryXS_LS_lb9_k4            -0.033
+  carryXS_long_lb9_k5          -0.034
+  carryXS_LS_lb6_k5            -0.044
+  carryXS_LS_lb9_k5            -0.134
+
+==============================================================================
+VEREDITO: FALHA
+==============================================================================

@@ -1,0 +1,35 @@
+======================================================================
+SENSIBILIDADE A CUSTOS — setups FimatheEngine LONG (em R)
+======================================================================
+Custo round-trip em R = custo_bps x (1+saida)/risco%. Stop apertado faz o
+custo devorar mais R. Risco medio por trade: acoes 14.78% | cripto 35.27%.
+
+custo(bps RT)  grupo     exp(R)    PF   win%
+----------------------------------------------------------------------
+0              ACOES     +0.138   1.77   58%
+0              CRIPTO    +0.254   2.10   56%
+10             ACOES     +0.121   1.65   57%
+10             CRIPTO    +0.247   2.05   56%
+50             ACOES     +0.051   1.24   53%
+50             CRIPTO    +0.220   1.90   56%
+70             ACOES     +0.017   1.07   51%
+70             CRIPTO    +0.207   1.83   56%
+100            ACOES     -0.036   0.86   47%
+100            CRIPTO    +0.186   1.72   54%
+140            ACOES     -0.105   0.65   41%
+140            CRIPTO    +0.159   1.59   49%
+----------------------------------------------------------------------
+CUSTO DE BREAKEVEN (expectancy cruza zero):
+  ACOES   : ~80 bps round-trip   (custo real ~5-10bps => folga grande)
+  CRIPTO  : ~373 bps round-trip  (stop largo 35% => custo e ~nada em R)
+  TODOS   : ~91 bps round-trip
+
+DIAGNOSTICO:
+- Os setups breakout SOBREVIVEM a custos realistas com folga. Cripto e
+  altamente cost-robusto (stop largo). Acoes aguentam ate ~80bps (8x o real).
+- Logo, CUSTO NAO e o que derruba o edge no tribunal (edge_verdict.txt).
+- O 'FALHA' do tribunal vem de OUTRA coisa: (1) PBO 0.50 = overfitting de
+  selecao de simbolo; (2) o tribunal mede trailing_stop (nao o breakout) e
+  usa barra de Sharpe anual liquido >= 0.8; (3) edge por-trade != Sharpe de
+  carteira diaria (muitos dias flat diluem o Sharpe).
+======================================================================

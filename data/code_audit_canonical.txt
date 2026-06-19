@@ -1,0 +1,170 @@
+================================================================================
+AUDITORIA INDEPENDENTE E ADVERSARIAL — FIMATHE CANONICA EM FOREX
+Auditor: O CODER (read-only no codigo). Data: 2026-06-15.
+Alvo: fimathe/canonical.py, simulation/fimathe_forex_canonical.py,
+      data/fimathe_canonical_verdict.txt (veredito = FALHA).
+Spec de referencia: docs/FIMATHE_SPEC.md. Stats: simulation/statistics.py.
+Mandato: tentar DERRUBAR o FALHA (achar bug que cause FALSO NEGATIVO) e
+         caçar FALSO POSITIVO escondido. So concluir depois de tentar quebrar.
+================================================================================
+
+>>> VEREDITO DE CONFIANCA: FALHA CONFIAVEL <<<
+
+A FIMATHE canonica realmente NAO tem alpha price-based em forex majors. O veredito
+e ROBUSTO: sobrevive a todas as tentativas de quebra abaixo, INCLUSIVE ao teste
+mais generoso possivel (custo ZERO). Nenhum bug de direcao/sinal/swap/leak foi
+encontrado que pudesse inverter o resultado. Nenhum falso positivo escondido.
+
+Tres achados de DESIGN (nao bugs) merecem registro — um deles QUASE vira falso
+negativo, mas foi testado e NAO inverte o veredito (ver A2). Severidades abaixo.
+
+--------------------------------------------------------------------------------
+0. REPRODUTIBILIDADE — OK (CONFIRMADO)
+--------------------------------------------------------------------------------
+`uv run python -m simulation.fimathe_forex_canonical --report-file /tmp/repro.txt`
+roda limpo e o output e BYTE-A-BYTE IDENTICO ao data/fimathe_canonical_verdict.txt
+(diff vazio). Importa sem efeitos colaterais. n_trials=40 confere com o grid real
+(5 pares x 2 combos-TF x 2 variantes x 2 swings). Determinístico.
+
+Dados: cache em data/forex_cache/ presente p/ os 5 pares x D1/H4/H1. NOTA de
+cobertura: H4/H1 sao derivados de H1 do yfinance (teto ~730 dias), entao o TF de
+OPERACAO so cobre ~ago/2023..jun/2026 (~2.8 anos), enquanto D1 cobre 5 anos. Isso
+ENCURTA a amostra de operacao (poucos trades em D1->H4: 5-26/config) mas nao
+enviesa a DIRECAO do alpha. E uma limitacao de dado honesta, nao um bug.
+
+--------------------------------------------------------------------------------
+1. ENTRADA / DIRECAO / FILTRO DE TENDENCIA — OK (sem bug; tese de FALSO NEGATIVO
+   por "entrada invertida" ou "filtro cego" DESCARTADA)
+--------------------------------------------------------------------------------
+Instrumentei o motor (EURUSD D1->H4, sw=6):
+  - trend dist: up=44%  dn=27%  flat=28%  -> filtro NAO e cego/restritivo demais;
+    opera em 71% das barras com tendencia. Marcacao de tendencia no sentido CERTO.
+  - 100% dos BUY disparam com trend>0; 100% dos SELL com trend<0; ZERO em flat.
+    A FAVOR da tendencia, sentido correto. Variante A (50% do CR) e B (rompimento
+    da ZN apos visitar a ZN) ambas geram sinais no lado certo.
+  - Variante B exige de fato (1) o preco recuar PARA DENTRO da ZN e (2) fechar de
+    VOLTA cruzando a fronteira NEAR no sentido da tendencia (visited_zn). Confere
+    com a spec ("se ja passou dos 50%, espera o fechamento alem do limite da ZN").
+    Interpretacao discricionaria, mas honesta e conservadora (B gera POUCOS sinais:
+    5-12 por config — amostra pequena, mas reportada, nao suavizada).
+
+--------------------------------------------------------------------------------
+2. ALPHA — OK (calculo e SINAL corretos)
+--------------------------------------------------------------------------------
+alpha_ret = net_ret - bh_ret, com bh_ret = close[exit_bar]/entry - 1 medido na
+MESMA janela de exposicao (mesmos bars entrada->saida) do trade. Verifiquei
+numericamente: max|alpha - (net-bh)| = 0.00e+00. Sinal correto (alpha negativo =
+estrategia perde do B&H). A correcao critica do Planner (alpha, nao Sharpe vs zero)
+esta REALMENTE implementada: DSR e Sharpe de aprovacao rodam sobre a SERIE DE
+ALPHA (confirmado em _config_passes -> evaluate_edge(r.alpha_returns,...)).
+
+--------------------------------------------------------------------------------
+3. SWAP — OK (NAO inflado; noites e triplo-de-quarta corretos)
+--------------------------------------------------------------------------------
+Hand-check do _nights_swap_pips (reusado do baseline, nao reimplementado):
+  - n de noites == n de meia-noites de calendario cruzadas (UTC). Bate 1:1 com o
+    hold real (ex.: Tue->Thu = 2 noites; hold de 60 barras H4 = 14 dias = 14 noites).
+  - Quarta-feira TRIPLA: Tue10:00->Wed10:00 (long EURUSD -10/noite) = -30 pips (3x).
+    Tue->Thu = -40 (Qua 3x + Qui 1x). CORRETO. Nao ha cobranca em dobro.
+  - swap aplicado por noite, sinal correto (negativo = paga).
+O swap e GRANDE (ate ~-180 pips/trade em EURUSD long, 14 noites x -10 x quarta),
+mas isso e CONSEQUENCIA do hold longo (ver achado A2), nao de formula inflada.
+
+--------------------------------------------------------------------------------
+4. MULTI-TIMEFRAME (vazamento macro->micro) — OK (0 leaks, CONFIRMADO de verdade)
+--------------------------------------------------------------------------------
+Testei TODAS as 4433 barras micro (EURUSD): cada barra micro carrega EXATAMENTE a
+marcacao da ultima barra D1 que JA FECHOU (close = proximo timestamp D1). Zero
+mismatches, zero vazamento de futuro. O align_marking desloca o indice macro para
+o instante de fechamento e faz merge_asof 'backward' corretamente. A afirmacao do
+autor de "0 mismatches" se sustenta sob auditoria. Sem look-ahead na marcacao.
+
+--------------------------------------------------------------------------------
+5. ZN / STOP / ALVO conforme a spec — OK
+--------------------------------------------------------------------------------
+Em 123 barras de sinal (EURUSD A): ZN e canal ADJACENTE de MESMO tamanho do CR
+(|zn_far-zn_near| == cr_range, exato), do lado CONTRARIO a tendencia (alta->abaixo,
+baixa->acima), stop SEMPRE FORA da ZN (alem da borda far + buffer), e ordenacao
+stop<entry<target (alta) / target<entry<stop (baixa) sempre coerente. Alvo =
+projecao 2x do range a partir do entry_ref (50% do CR na A; fronteira da ZN na B).
+Tudo fiel as 10 correcoes listadas na FIMATHE_SPEC.md.
+
+--------------------------------------------------------------------------------
+6. ESTATISTICA (DSR/PSR/PBO/benchmark) — OK, com 1 caveat MENOR (nao inverte nada)
+--------------------------------------------------------------------------------
+- DSR/Sharpe medidos sobre a serie de ALPHA. n_trials=40 = grid honesto. PBO via
+  CSCV sobre a matriz de alpha por trade (so quando ha >=2 configs e >=20 trades;
+  senao reporta "n/a amostra" e trata como REPROVA — conservador).
+- O benchmark anti-snooping (sr_benchmark) e estimado da PROPRIA serie (Lo 2002,
+  pois trial_sharpes nao e passado). Isso INFLA o obstaculo (ex.: 18.05 anual no
+  "melhor" config) -> torna o gate MAIS rigoroso, NUNCA mais frouxo. So pode causar
+  FALHA estrita, jamais um PASS falso. [Severidade: BAIXA — direcao segura.]
+- Como TODOS os Sharpe_alpha sao NEGATIVOS, DSR ~0 independentemente do benchmark.
+
+--------------------------------------------------------------------------------
+ACHADOS DE DESIGN (registrados; testados; NAO invertem o veredito)
+--------------------------------------------------------------------------------
+A1 [INFORMATIVO] — Tensao na spec: alvo 2x vs horizonte "2-4 candles".
+   A spec pede alvo = projecao 2x do canal E, separadamente, "horizonte ~2-4 candles
+   no TF de operacao". Em D1->H4 o alvo 2x fica a ~605 pips (EURUSD) / ~1065 pips
+   (USDJPY) — distancia que o preco quase nunca percorre em poucos candles. As duas
+   regras da spec sao mutuamente quase incompativeis. O motor escolheu o alvo 2x +
+   um cap de hold (MAX_HOLD_BARS H4=60, H1=120). Decisao defensavel, mas e a raiz de A2.
+
+A2 [SEVERIDADE MEDIA — CANDIDATO A FALSO NEGATIVO, MAS TESTADO E DESCARTADO]
+   simulation/fimathe_forex_canonical.py:179,207 + MAX_HOLD_BARS.
+   90-96% dos trades em D1->H4 NAO batem stop nem alvo — eles ESTOURAM o cap de 60
+   barras (10 dias) e saem em close[cap] (deriva quase aleatoria), acumulando ~14
+   noites de swap. Ou seja: o tribunal nao mede "a entrada FIMATHE tem edge"; mede
+   "segurar 10 dias a favor da tendencia, menos 14 noites de swap, bate o B&H?".
+   Isso PODERIA ser um falso negativo (matar a tecnica por causa do cap/alvo).
+   ENTAO TESTEI exaustivamente, variando o exit de forma FIEL:
+     - alvo 1x (mais alcancavel):      gross/tr ~+0.15% (EURUSD), ~+0.26% (USDJPY) — flat.
+     - cap 300 barras (deixa resolver): gross PIORA (EURUSD +0.04%, USDJPY -0.51%);
+       o sub-ciclo de protecao dispara 9/14 vezes e stopa perto do breakeven -> a
+       gestao FIEL da propria tecnica NAO extrai edge; net desaba (-4%) por +noites.
+     - alvo 0.5x + cap 300:             idem, gross ~flat/neg.
+     - sem trailing:                    igual ao baseline (gross +0.22%).
+   CONCLUSAO: relaxar o cap/alvo PIORA, nao melhora. Nao ha edge bruto preso atras do
+   cap. O cap nao cria o FALHA — apenas limita o sangramento de swap. NAO inverte.
+
+A3 [INFORMATIVO] — require_fresh_cr + 1 setup por vez reduzem trades. Conservador
+   (evita reusar canal velho), reportado em "CONFIGS SEM AMOSTRA". Nao enviesa direcao.
+
+--------------------------------------------------------------------------------
+TESTE DECISIVO — A FAVOR DO REU (custo ZERO): o FALHA e da ENTRADA, nao do swap
+--------------------------------------------------------------------------------
+Removi spread E swap COMPLETAMENTE (o fator que o veredito culpa) e medi alpha =
+gross - B&H em todas as 39 configs com >=5 trades:
+  - So 11/39 configs tem alpha POSITIVO mesmo a custo ZERO (~moeda ao ar; sem edge
+    sistematico — esperado ~metade so por ruido).
+  - Melhor config costless: EURGBP D1->H4 B sw=10, Shp_alpha=+0.82 — MAS n=8 trades.
+    Com n=8 e 40 trials, o obstaculo DSR e altissimo: e exatamente o tipo de fluke
+    de amostra minima que o gate (DSR/PBO/amostra) existe p/ rejeitar. Nao concentra
+    nos pares de foco (EURGBP/USDCHF de menor vol), e disperso e instavel.
+  - 28/39 configs FALHAM em bater o B&H ATE sem custo nenhum.
+=> Confirma a narrativa do veredito: a entrada canonica NAO gera edge bruto; o swap
+   apenas "enterra mais fundo" um corpo ja sem pulso. Tirar o swap nao ressuscita alpha.
+
+--------------------------------------------------------------------------------
+CAÇA A FALSO POSITIVO ESCONDIDO — NENHUM
+--------------------------------------------------------------------------------
+Varri TODO o grid (base): ZERO config tem alpha/tr>0 OU Sharpe_alpha>0 no cenario
+com custo real. O FALHA e UNANIME, nao knife-edge. No cenario costless o unico
+"vencedor" digno de nota (EURGBP B sw=10) tem n=8 e cai no gate de amostra/DSR.
+Nao ha config que passaria o GATE 1 e foi indevidamente marcada FALHA.
+
+--------------------------------------------------------------------------------
+RESUMO DE SEVERIDADES
+--------------------------------------------------------------------------------
+  CRITICO  (inverteria a direcao): NENHUM.
+  ALTO:                            NENHUM.
+  MEDIO:   A2 (cap/alvo -> 90% timeout) — testado, NAO inverte (relaxar piora).
+  BAIXO:   benchmark DSR estimado da propria serie (so endurece o gate); A1/A3 design.
+
+CONCLUSAO FINAL: FALHA CONFIAVEL. A FIMATHE canonica (CR + ZN adjacente, a favor da
+tendencia, stop fora da ZN, alvo 2x, sub-ciclo, multi-TF marca D1/opera H4) nao tem
+alpha price-based em forex majors — comprovado inclusive a custo ZERO. O motor e
+fiel a spec, sem look-ahead, swap correto, alpha bem calculado. Pode-se MATAR a
+tese forex price-based com seguranca; o veredito FALHA e robusto e honesto.
+================================================================================

@@ -1,0 +1,29 @@
+==============================================================================
+TRIBUNAL — PAIRS / COINTEGRACAO (stat-arb)
+==============================================================================
+Universo: 40 tickers | barras=16223 | 1962-01-02 -> 2026-06-17
+Pares candidatos (intra-grupo): 91 | custo=equity_base_stress2x (6.0 bps/lado)
+n_trials honesto = 91 pares x 18 params = 1638
+
+Rodando grade de configs (walk-forward OOS, formacao 252d / trade 126d)...
+Configs com trades: 18 | melhor: z_entry=1.5 z_exit=0.0 lookback=40 | pares operados=91
+
+------------------------------------------------------------------------------
+RESULTADO (config vencedora, cenario de custo ESTRESSADO 2x):
+[FALHA] Sharpe_anual=0.43 (obstaculo data-snooping=0.39) | PSR=1.000 DSR=0.631 | n=15971 trials=1638 skew=0.54 kurt=34.07
+  Sharpe_anual_liq = 0.43  (SPY buy&hold mesmo periodo = 0.65)
+  CAGR = 0.36%   MaxDD = -3.00%
+  DSR = 0.631   PSR = 1.000   PBO = 0.028
+  corr vs SPY = 0.059  (esperado ~0, market-neutral)
+  n_obs=15971  n_trials=1638
+
+DECAIMENTO POR PERIODO (Sharpe anual liq da config vencedora):
+  1990s: Sharpe=  0.50  n=2528
+  2000s: Sharpe=  0.29  n=2515
+  2010s: Sharpe= -0.12  n=2516
+  2020s: Sharpe=  0.47  n=1623
+
+==============================================================================
+VEREDITO: REPROVA
+REPROVA: DSR=0.631<0.95 (Sharpe nao sobrevive ao data-snooping de 1638 trials); Sharpe_liq=0.43<0.8; nao bate SPY (0.43 vs 0.65) nem diversifica (corr=0.06)
+==============================================================================

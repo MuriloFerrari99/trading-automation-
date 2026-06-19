@@ -1,0 +1,214 @@
+================================================================================================
+AUDITORIA INDEPENDENTE/ADVERSARIAL — "O CODER"
+ALVO: simulation/beta_v2.py + data/beta_v2_verdict.txt
+(importa simulation/beta_portfolio.py, ja auditado em data/code_audit_beta.txt)
+SPEC DE PRODUCAO recomendada: vol-target + hedge condicional opcional + alavancagem.
+Veredito do AUTOR: "DEFENSIVO" (vol-target alavancado NAO domina o beta cru).
+================================================================================================
+[STATUS] COMPLETO.
+
+================================================================================================
+VEREDITO DO CODER:  *** DEFENSIVO CONFIAVEL ***  (com 1 caveat de robustez registrado)
+================================================================================================
+A conclusao central do autor — "o vol-target alavancado e DEFENSIVO, NAO domina o beta cru"
+— esta CORRETA, reproduz byte-a-byte, e e ROBUSTA para qualquer custo de financiamento
+REALISTA (>= ~4% a.a.). Auditei nas DUAS direcoes (falso positivo e falso negativo) e NAO
+encontrei nenhum bug que mude a conclusao numa direcao realista.
+
+  - Financiamento: implementado CORRETAMENTE. L=1x tem custo de financiamento EXATAMENTE
+    zero (gross nunca passa de 1.0 por construcao); L>1x paga juro diario so sobre
+    max(gross-1,0). Verificado por recomputacao manual (diff = 0.0).
+  - Fronteira: monotona, limpa, reproduz exatamente. Crossovers (DD estoura -38.8% em
+    ~3.1x; retorno iguala +16% em ~4.5x) reproduzem. Como o tombo estoura ANTES do retorno
+    bater, nao existe L dominante a 5.5% -> DEFENSIVO. Correto.
+  - SEM look-ahead: provado por TESTE DE CAUSALIDADE (truncar o painel e recomputar pesos
+    da diff 0.0 em todas as linhas) — tanto p/ o vol-target base quanto p/ o hedge.
+  - Hedge condicional: sem vazamento; o numero de 2008 (+7.6%) e REAL (SPY zerado em 90%
+    dos dias da GFC, sobra bonds/ouro). A decisao de NAO incluir o hedge e conservadora,
+    nao um bug.
+  - Reprodutibilidade: `uv run python -m simulation.beta_v2` regenera o relatorio
+    identico (cache offline ja presente em data/beta_cache/).
+
+CAVEAT DE ROBUSTEZ (severidade BAIXA, direcao FALSO-NEGATIVO — NAO invalida o veredito):
+  A conclusao "DEFENSIVO" depende de o financiamento ser > ~4% a.a. A 0% de financiamento
+  (cenario IRREAL — margem sempre custa), a alavancagem PASSARIA a dominar (L=2.3x ->
+  CAGR +16.1% / MaxDD -28.8% / Sharpe 1.19). A 4% (o "otimista" que o autor testa) NAO ha
+  dominacao na grade fina, mas a margem e FINA (em ~L=3.1x: CAGR +15.7% vs beta +16.0%,
+  DD -38.4% vs -38.8% -> quase-empate). O autor declara 5.5% e mostra 4%/5.5%/7%; o
+  veredito e correto para todos eles. Apenas registro que a conclusao e SENSIVEL ao premio
+  de financiamento e que 5.5% e uma premissa razoavel-a-conservadora (Fed funds historico
+  + spread de margem de broker). Recomendacao: manter a premissa explicita e, em producao,
+  usar a taxa de margem REAL do broker (Alpaca/IBKR ~ base+1.5-2.5%).
+
+Nenhum achado de severidade ALTA. Nenhum achado que mude a conclusao numa direcao realista.
+
+================================================================================================
+ESCOPO E METODO
+================================================================================================
+  Read-only. Reproduzi todos os numeros com o cache existente (8 ativos, 1993..2026-06-15),
+  e escrevi harnesses de verificacao independente (nao confiei na prosa do modulo):
+    - recomputacao manual do financiamento dia-a-dia;
+    - teste de causalidade por truncamento de painel (look-ahead);
+    - varredura fina da fronteira de alavancagem (L de 1.0 a 6.0, passo 0.05/0.1);
+    - varredura de dominacao por nivel de financiamento (0% / 4% / 5% / 5.5% / 7%);
+    - verificacao de que a alavancagem escala vol e custo de transacao linearmente;
+    - reconstrucao das janelas de crise.
+
+================================================================================================
+1) FINANCIAMENTO DA ALAVANCAGEM  — CORRETO (severidade: nenhuma)
+================================================================================================
+  beta_v2.py:224-252 (run_portfolio_levered), :247-248 (taxa diaria), :245 (emprestado).
+
+  AFIRMACAO DO AUTOR: 5.5% a.a. sobre max(gross-1,0), cobrado DIARIAMENTE, so sobre o
+  emprestado; L=1x custo zero; L=2x perde o juro certo.
+
+  VERIFICADO (tudo confere):
+    a) L=1.0x custo de financiamento = ZERO. O net de run_portfolio_levered(L=1) e
+       IDENTICO ao de run_portfolio (max abs diff = 0.0). Motivo estrutural: o vol-target
+       base tem gross <= 1.0 SEMPRE (max medido = 1.000000, 0% dos dias > 1) — entao
+       borrowed = max(gross-1,0) = 0 em todo dia. L=1x NUNCA toma emprestado. CORRETO.
+       (beta_v2.py:245 `borrowed = (gross-1).clip(lower=0)`; gross base capado em
+        beta_portfolio.py:363-366.)
+    b) Taxa diaria: (1+0.055)^(1/252)-1 = 0.000212486..., que recomposta da 5.5% a.a.
+       exato. Composicao geometrica correta (beta_v2.py:247). CORRETO.
+    c) L=2.0x: reconstrui o net a mao = net_tx(pesos alavancados) - borrowed*daily_rate.
+       Bate EXATAMENTE (np.allclose atol=0). 79% dos dias com borrowed>0 (coerente com
+       gross medio 1.43). O juro de fato come o ganho da alavancagem. CORRETO.
+    d) O custo incide sobre o gross EFETIVAMENTE carregado em t (peso ja decidido em t-1
+       via shift herdado) — sem look-ahead (vide secao 4). A reindexacao
+       gross.reindex(net_tx.index) NAO gera NaN (todos os dias do net existem nos pesos).
+    e) Custo de TRANSACAO da alavancagem: escala linearmente com L (L=1 -> 1.151%;
+       L=2 -> 2.302% de custo total). Cobrado sobre a turnover ALAVANCADA (run_portfolio
+       roda nos pesos*L). O financiamento e subtraido SEPARADAMENTE por cima — sem
+       double-count, sem omissao. CORRETO e conservador.
+
+================================================================================================
+2) FRONTEIRA DE ALAVANCAGEM + CROSSOVERS  — CORRETO (severidade: nenhuma p/ a conclusao)
+================================================================================================
+  beta_v2.py:289-328 (leverage_frontier / find_crossovers), :416-423 (logica do veredito).
+
+  REPRODUZ (grade fina, financiamento 5.5%, janela diversificada desde 2004-11-18):
+    BUY&HOLD beta cru: CAGR +15.97% | MaxDD -38.78% | Sharpe 0.97   (= "16%/-38.8%")
+    L=1.0x: +6.93% / -13.50% / 1.19   L=1.5x: +9.35% / -19.70% / 1.08
+    L=2.0x: +10.89% / -25.88% / 0.95  L=3.0x: +13.30% / -37.83% / 0.81
+    L=3.1x: +13.51% / -38.95% / 0.80  (DD estoura -38.8% AQUI)
+    L=4.5x: +16.11% / -52.87% / 0.71  (retorno iguala +16% AQUI)
+  -> Crossovers: l_dd(breach) = 3.1x ; l_ret(match) = 4.5x. IDENTICO ao relatorio.
+  -> Como l_dd(3.1) < l_ret(4.5), o TOMBO estoura ANTES do retorno bater. No L em que o
+     tombo iguala o beta (~3.0x), o CAGR e so +13.3% (< +16%). Logo NAO existe L que
+     domine (mesmo retorno, menos tombo). DEFENSIVO. A logica de _build_verdict
+     (l_ret <= l_dd => atraente; senao defensivo) esta CORRETA para este caso.
+  -> A fronteira e monotona e bem-comportada (CAGR sobe, MaxDD piora, Sharpe cai com L) —
+     coerente com financiamento+custo comendo o excesso. Sem descontinuidade suspeita.
+
+  ROBUSTEZ A FINANCIAMENTO (varredura fina de DOMINACAO — CAGR>=beta E DD<beta):
+     financiamento 0.0% : DOMINA (20 niveis; ex. L=2.3x -> +16.1%/-28.8%/Sharpe 1.19).
+     financiamento 4.0% : NAO domina (defensivo). [margem fina: L~3.1x +15.7%/-38.4%]
+     financiamento 5.0% : NAO domina (defensivo).
+     financiamento 5.5% : NAO domina (defensivo).  <- premissa do autor
+     financiamento 7.0% : NAO domina (defensivo).
+  -> O veredito DEFENSIVO e robusto para todo financiamento REALISTA (>= ~4%). So vira
+     no caso IRREAL de 0% (margem de graca). Caveat de robustez registrado no topo.
+  NOTA: find_crossovers usa grade de passo 0.1 e arredondamento round(L,2). A 4% ele
+  reporta l_dd==l_ret==3.2 (empate por arredondamento); a varredura fina (passo 0.05)
+  confirma que a 4% NAO ha L estritamente dominante. A conclusao do autor a 4% ("nenhum L
+  da grade {1,1.3,1.5,2} recupera 16% com DD<-38.8%") e literalmente verdadeira tambem
+  (o maior da grade a 4% e L=2 -> +11.7%). Sem contradicao.
+
+================================================================================================
+3) HEDGE CONDICIONAL  — SEM LOOK-AHEAD; 2008 +7.6% REAL (severidade: nenhuma)
+================================================================================================
+  beta_v2.py:103-138 (_sustained_bear_flags), :141-206 (weights_volt_with_conditional_hedge).
+
+  REGRA: bear sustentado = (preco < SMA200 por >=20 dias CONSECUTIVOS) OU (drawdown do
+  pico expansivo > 20%). Verificado:
+    - SMA com min_periods=sma_window (so dispara apos warmup completo). below.fillna(False)
+      (sem SMA -> nao des-arrisca). CORRETO.
+    - Streak consecutivo (loop beta_v2.py:125-130): conta sequencia corrente de "below";
+      backward-only. CORRETO.
+    - Drawdown via cummax (maximo EXPANSIVO, beta_v2.py:133): so passado. CORRETO.
+    - O .shift(1) final (beta_v2.py:206) garante peso(t) decidido com dado <= t-1.
+  TESTE DE CAUSALIDADE (decisivo): truncar o painel em 2020-06-01 e recomputar os pesos
+  do hedge -> diff 0.0 vs pesos do painel inteiro em TODAS as 6884 linhas da janela. NAO
+  HA LOOK-AHEAD. (Mesmo teste no vol-target base: diff 0.0.)
+
+  2008 (+7.6%) REAL: crisis_returns_lev reproduz {2008:+7.62%, COVID:+1.65%, 2022:-11.1%}.
+  Durante a GFC o peso de SPY no book de hedge e ~0 em 90% dos dias (des-arriscado), gross
+  cai p/ media 0.66 -> a sobra (bonds/ouro no flight-to-safety) gera o +7.6%. Recomputado
+  a mao: +7.62%. NAO e artefato de alavancagem (gross do hedge nunca > 1.0 -> financiamento
+  e NO-OP; net levered == net plain, diff 0.0). CORRETO.
+
+  OBS (honestidade, NAO bug): o autor mede o hedge na MEDIA (Sharpe 1.19->1.13) e conclui
+  "NAO incluir", APESAR de o hedge salvar +7.6% vs -0.3% em 2008. Isso e o oposto de
+  super-vender: ele PENALIZA o proprio hedge no criterio de Sharpe-medio, registrando o
+  beneficio de cauda como ressalva. Decisao defensavel e conservadora.
+
+================================================================================================
+4) LOOK-AHEAD HERDADO + ALAVANCAGEM  — PRESERVADO; SEM VAZAMENTO (severidade: nenhuma)
+================================================================================================
+  - shift(1) herdado de beta_portfolio preservado: o vol-target base
+    (weights_disciplined, use_gate=False) e usado tal-e-qual; leverage_weights so
+    multiplica por L (beta_v2.py:218-221) -> nao desfaz o shift, nao reordena, nao
+    reindexa p/ frente. Teste de causalidade por truncamento: diff 0.0.
+  - run_portfolio_levered nao introduz vazamento: net_tx vem do motor auditado; o juro de
+    t usa gross(peso(t)) com peso(t) ja decidido em t-1.
+  CONCLUSAO: a alavancagem NAO introduz look-ahead.
+
+================================================================================================
+5) METRICAS / ANUALIZACAO  — CORRETO (severidade: nenhuma)
+================================================================================================
+  - compute_stats (herdado, beta_portfolio.py:447-468) reusado sem alteracao; mesma base
+    p/ estrategia, hedge e benchmark -> comparacao justa.
+  - Anualizacao usa contagem de DIAS DE PREGAO (equity.size/252), nao calendario. Na
+    janela (21.53 anos de pregao vs 21.57 calendario), o CAGR difere ~0.02 ponto
+    percentual (10.889% vs 10.868% em L=2). Aplicado IGUALMENTE a todos -> NAO enviesa a
+    comparacao. Aceitavel.
+  - MaxDD via metrics.max_drawdown (peak expansivo). Sharpe/Sortino anualizados por
+    sqrt(252), ddof=1. CORRETO.
+  - avg_gross (avg_exposure) = media do gross alavancado (|w|.sum) -> 112% em L=1.5,
+    149% em L=2.0. Bate com o relatorio. CORRETO.
+  - As metricas da fronteira rodam na MESMA janela diversificada (>=2004-11-18) que o
+    benchmark; a tabela de crise usa historico inteiro (ressalva declarada). Coerente.
+
+  NOTA (benigno, NAO bug): a tabela de CRISE define janelas FIXAS (ex. COVID termina
+  2020-04-30). Como abril/2020 ja recuperou o V, o buy&hold fecha a janela +5.5% embora o
+  trough intra-janela tenha sido -25.8%. Isso vale IGUAL p/ as 3 estrategias e o MaxDD
+  "de verdade" e medido a parte (historico inteiro). O leitor deve ler a coluna de crise
+  como "retorno ate o fim da janela", nao como "pior momento". Sem impacto no veredito.
+
+================================================================================================
+6) REPRODUTIBILIDADE  — OK (severidade: nenhuma)
+================================================================================================
+  `uv run python -m simulation.beta_v2` (com e sem --no-sensitivity) regenera o relatorio
+  IDENTICO ao data/beta_v2_verdict.txt commitado (todas as celulas batem: Sharpe
+  1.19/1.13/0.97, MaxDD -13.5/-12.9/-38.8, fronteira, crossovers 3.1x/4.5x, crise, e a
+  tabela de sensibilidade 4%/5.5%/7%). O cache offline (data/beta_cache/*.csv, ate
+  2026-06-15) torna a execucao determinista e sem rede. Backup do verdict feito antes de
+  re-rodar; saida byte-identica.
+
+  ALERTA OPERACIONAL (NAO bug): rodar `--force` re-baixa o cache do yfinance e pode mudar
+  os numeros (revisoes de dados ajustados / novas barras). Para uma AUDITORIA estavel,
+  use o cache versionado. (Vale p/ todo o stack de simulacao, nao so este modulo.)
+
+================================================================================================
+RESUMO POR SEVERIDADE
+================================================================================================
+  ALTA   : (nenhuma)
+  MEDIA  : (nenhuma)
+  BAIXA  : [B1] Conclusao DEFENSIVO e sensivel ao premio de financiamento: robusta a
+                >= ~4% a.a. (premissa do autor 5.5% e razoavel-conservadora), mas viraria
+                a 0% (irreal). Margem fina a 4%. Manter premissa explicita; usar taxa de
+                margem real do broker em producao.  (direcao: falso-negativo controlado)
+  INFO   : - Tabela de crise usa janelas fixas (retorno ate o fim, nao o trough). Benigno,
+             aplicado igual a todos.
+           - Anualizacao por dias de pregao (vs calendario): ~0.02pp, neutro na comparacao.
+           - Hedge: decisao de NAO incluir e conservadora apesar do +7.6% em 2008 (honesto).
+           - Reproducao estavel exige o cache versionado (--force pode mover numeros).
+
+CONCLUSAO FINAL: *** DEFENSIVO CONFIAVEL ***. O codigo faz o que a prosa promete; o
+financiamento e cobrado corretamente (L=1x zero, L>1x so sobre o emprestado, diariamente);
+nao ha look-ahead (provado por truncamento); a fronteira e os crossovers reproduzem; o
++7.6% de 2008 e real. O veredito "vol-target alavancado e DEFENSIVO, nao domina o beta
+cru" e CORRETO e robusto a qualquer custo de financiamento realista. Nao houve nem
+super-venda da defensividade (falso positivo) nem pessimismo por bug (falso negativo).
+================================================================================================

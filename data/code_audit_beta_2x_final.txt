@@ -1,0 +1,275 @@
+================================================================================
+AUDITORIA ADVERSARIAL — PORTAO FINAL p/ LIGAR O BETA A 2.0x NO PAPER (DAY-0)
+Auditor: O CODER (independente, read-only; NAO escrevi este codigo).
+Repo: /Users/muriloferrari/Projetos/trading-automation   Data: 2026-06-15.
+Rodada: re-auditoria do FIX de cripto/margem (RESERVA DE CAIXA) que o Executor
+fez apos eu reprovar a 2.0x por causa do leg de cripto nao-marginavel.
+Metodo: NAO confiei na prosa nem nos 381 testes verdes nem no FakeBroker do
+Executor. REPRODUZI cada item com (a) um broker de DOIS POOLS escrito por MIM do
+zero (Reg-T 2x p/ acoes + caixa cash-only p/ cripto, com a rejeicao server-side),
+(b) o painel REAL (data/beta_cache, 8 ativos, 8401 barras, 1993..2026), (c) o
+motor de backtest REAL (run_portfolio_levered), (d) o Executor REAL e o
+_order_for_cash_reservation REAL, e (e) o SDK alpaca-py p/ confirmar a semantica
+de conta. Tudo o que afirmo abaixo eu rodei.
+================================================================================
+
+*** VEREDITO: SEGURO LIGAR a 2.0x (paper). ***
+
+O BLOQUEADOR da rodada anterior (cripto a 2.0x rejeitada por falta de caixa, book
+vivo = acoes + 0% cripto) FOI RESOLVIDO. A correcao e de EXECUCAO (reserva de
+caixa: SELLs -> cripto BUYs -> acoes BUYs), e uma PERMUTACAO PURA das ordens, NAO
+muda posicoes/pesos/alavancagem 2.0x, e o financiamento residual e ZERO no painel
+real. Reproduzi o pior caso ponta-a-ponta com semantica de 2 pools fiel a Alpaca:
+a cripto agora EXECUTA e o book vivo = 189.7% acoes + 10% cripto = backtest.
+
+Nenhuma regressao no caminho compartilhado (Executor/broker): com a flag OFF o
+sistema e BIT-A-BIT o legado; o novo ramo de validacao so morde simbolos de cripto
+(par com '/'), que so existem no universo do beta; as acoes legadas seguem o MESMO
+gate de buying_power de sempre. Suite: 381 passed, 0 skip/xfail (os testes de
+painel REAL rodaram de fato — o cache existe — entao a paridade foi exercitada
+contra dados reais, nao pulada).
+
+Restam 2 NOTAS de DOCUMENTACAO (LOW, NAO-bloqueadoras): um comentario subestima o
+pior dia historico (-5.67% no comentario vs -8.47% REAL em 1998) e outro o gross
+medio (~166% vs 150.3% REAL). Nenhum afeta codigo/comportamento — detalho no fim.
+
+--------------------------------------------------------------------------------
+RESUMO POR ITEM (status + evidencia que EU reproduzi)
+--------------------------------------------------------------------------------
+ [1 CRIPTO-EXECUTA]     OK / REPRODUZIDO. Pior caso 2016-06-02 (gross 200%, BTC
+                        10%) em conta margem 100k/2x com 2 pools REAIS: com a nova
+                        ordem a cripto NAO e rejeitada; book = 189.7% acoes + 10%
+                        cripto (= backtest), nao 189.7% + 0%.
+ [2 PERMUTACAO-PURA]    OK / REPRODUZIDO. 2000/2000 trials aleatorios:
+                        _order_for_cash_reservation e permutacao estavel de 3
+                        baldes; nunca adiciona/remove/redimensiona. Pesos e 2.0x
+                        intactos -> posicoes finais == backtest -> re-backtest
+                        desnecessario.
+ [3 FINANCIAMENTO-ZERO] OK / REPRODUZIDO no painel real (1066 dias com cripto>0):
+                        max|borrowed_live - borrowed_backtest| = 2.22e-16 (ruido
+                        de float). Cripto cash-funded NAO muda o emprestado nem o
+                        juro vs backtest.
+ [4 VALIDACAO-2POOLS]   OK / REPRODUZIDO. non_marginable_buying_power existe no SDK
+                        alpaca-py e o AlpacaBroker o le (fallback p/ cash). O
+                        Executor barra cripto > caixa e acao > buying_power, cada
+                        uma no pool CERTO. Pre-trade barra a sobra de cripto de
+                        forma GRACIOSA (retorna None, sem crash, sem chegar ao
+                        broker).
+ [5 REGRESSAO-NOVA]     NENHUMA / REPRODUZIDO. Flag OFF == legado bit-a-bit; o ramo
+                        de cripto so morde par com '/'; acoes legadas seguem o
+                        mesmo gate de buying_power; mudancas em monitor.py/
+                        trailing_stop.py/main.py sao ADITIVAS e default-OFF.
+ [6 INTACTOS]           OK / REPRODUZIDO. Guards 2.0x (DD-43/daily-8/per-symbol-
+                        210%) so pegam anomalia; boot-flat sadio; paridade de peso
+                        bit-a-bit; flag OFF no-op; 381 verdes, 0 skip.
+
+================================================================================
+ITEM 1 — CRIPTO EXECUTA A 2.0x? (foco maximo)  ===> OK, REPRODUZIDO
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:536-567 (_order_for_cash_reservation,
+chamado em :547 dentro de compute_plan); agents/executor.py:240-251 (validacao
+2-pools); broker/base.py:69-93 (AccountInfo.non_marginable_buying_power).
+
+REPRODUCAO (broker de 2 POOLS escrito por MIM — NAO o FakeBroker do Executor):
+modelei Reg-T fielmente: uma COMPRA de acao debita o caixa pelo NOTIONAL CHEIO
+(colateral; caixa fica negativo = emprestado) E debita o pool marginavel (2x
+equity); uma COMPRA de cripto debita so o caixa (1x) e e REJEITADA (raise) se
+notional > max(caixa,0). Pior caso 2016-06-02, conta 100k, BP=2x=200k:
+
+  CASO A (ORDEM ANTIGA: acoes primeiro, cripto por ultimo — o loop do universo):
+    -> filled = {SPY, QQQ, TLT, IEF};  BTC/USD NAO preenche.
+    -> book = 189.7% acoes + 0.0% cripto   (backtest = 189.7% + 10%)
+    => o BUG e REAL: as acoes consomem o caixa-colateral, o
+       non_marginable_buying_power vai a 0, e a cripto cai. (Aqui ate o pre-trade
+       do Executor ja a barrou contra o caixa=0, gracioso — mas o book fica errado.)
+
+  CASO B (FIX: _order_for_cash_reservation -> cripto ANTES das acoes):
+    order = ['BTC/USD', 'SPY', 'QQQ', 'TLT', 'IEF']
+    -> filled = {BTC/USD, SPY, QQQ, TLT, IEF}  (TODAS)
+    -> book = 189.7% acoes + 10.0% cripto = BACKTEST.  caixa final = -99.7k (margem).
+    => a cripto reserva o caixa enquanto ele existe; as acoes tomam margem. PARIDADE
+       do leg de cripto RESTAURADA.
+
+  CASO C (END-TO-END pelo compute_plan REAL, painel sintetico com cripto>0):
+    plan.intents (ja reordenado internamente) = ['BTC/USD','SPY','TLT','SLV'];
+    primeira intent e cripto; TODAS preenchem; pesos finais == alvo do backtest
+    dentro da banda; BTC final = 3.60% = alvo (NAO zero).
+
+CONFIRMO: a cripto executa a 2.0x e o book vivo = backtest.
+
+================================================================================
+ITEM 2 — E PERMUTACAO PURA?  ===> OK, REPRODUZIDO
+================================================================================
+ARQUIVO: strategies/beta_rebalancer.py:551-567 (_order_for_cash_reservation).
+
+PROPERTY TEST (2000 listas aleatorias de intents, BUY/SELL x acoes/cripto):
+  - multiset(saida) == multiset(entrada) em (symbol, side, qty): 2000/2000 OK
+    -> NUNCA adiciona, remove ou redimensiona ordem.
+  - ordem dos baldes sempre SELLs -> cripto BUYs -> acoes BUYs: 2000/2000 OK.
+  - ESTABILIDADE dentro de cada balde (ordem relativa preservada): 2000/2000 OK.
+A reordenacao so muda a SEQUENCIA de envio. Como as quantidades e os pesos-alvo
+nao mudam (e a paridade de PESO ja era bit-a-bit), as POSICOES FINAIS, os pesos e
+a alavancagem 2.0x batem com o backtest. plan.leverage == 2.0 (parametro intacto).
+=> A paridade vivo==backtest e preservada; RE-BACKTEST e REALMENTE desnecessario.
+
+Robustez extra: a reordenacao e persistida em plan.intents (:547) e o beta_live
+executa plan.intents (beta_live.py:176); execute_many preserva a ordem (loop
+sequencial, sem sort; cap anti-rajada 25 >> 8 do universo, nunca trunca). Mesmo se
+truncasse, manteria os PRIMEIROS — e a cripto agora e a primeira.
+
+================================================================================
+ITEM 3 — FINANCIAMENTO RESIDUAL ZERO?  ===> OK, REPRODUZIDO
+================================================================================
+ARQUIVO: simulation/beta_v2.py:245-250 (borrowed = (gross-1)+; juro sobre o
+emprestado), production_weight_frame (2.0x).
+
+REPRODUCAO no painel REAL (8401 barras; 1066 dias com cripto>0):
+  backtest:  borrowed_bt   = max(gross_total - 1, 0)            [cripto DENTRO do gross]
+  vivo:      cash_free     = max(1 - gross_cripto, 0)           [caixa apos reservar cripto]
+             borrowed_live = max(gross_acoes - cash_free, 0)    [so as acoes tomam margem]
+  RESULTADO: max|borrowed_bt - borrowed_live| = 2.220e-16  (ruido de float).
+             min(diff) = -2.22e-16 (se houvesse residual, seria FAVORAVEL ao vivo).
+             dias com gross_cripto > 1.0 (caixa nao cobriria a cripto) = 0
+             (max gross_cripto = 13.32% << 100% do caixa).
+             dias com assimetria de clip (bt=0 mas live>0) = 0.
+ALGEBRA: como o caixa cobre 100% do equity, gross_acoes - (1 - gross_cripto) =
+gross_total - 1. Logo o capital emprestado e IDENTICO -> o juro de 5.5% a.a. incide
+igual -> residual de CAGR = 0. A cripto sair do caixa (1x) NAO muda o emprestado:
+o caixa que ela usa SENAO reduziria o emprestado das acoes na mesma medida.
+=> A premissa de financiamento do backtest ja esta CORRETA p/ a cripto cash-funded.
+   Confirmo a alegacao (borrowed_live == borrowed_backtest, diff ~2e-16).
+
+================================================================================
+ITEM 4 — VALIDACAO 2-POOLS CORRETA?  ===> OK, REPRODUZIDO
+================================================================================
+ARQUIVOS: broker/base.py:69-93 (AccountInfo + non_marginable_buying_power, default
+= cash); broker/alpaca_broker.py:90-106 (le acct.non_marginable_buying_power via
+getattr, fallback cash); agents/executor.py:240-251 (validacao por pool);
+strategies/beta_rebalancer.py:569-596 (_note_crypto_cash_shortfall, gracioso).
+
+(A) O CAMPO EXISTE NA ALPACA (confirmado no SDK alpaca-py, TradeAccount):
+    - non_marginable_buying_power: presente. O AlpacaBroker o le (com fallback a
+      cash — a aproximacao correta de caixa liquidado).
+    - buying_power = max(equity-initial_margin,0)*2 com multiplier=2 (Reg-T); =cash
+      com multiplier=1. Ou seja, o pool MARGINAVEL e ~2x equity numa conta de margem.
+    => A modelagem de 2 pools do fix e FIEL a corretora real.
+
+(B) O EXECUTOR CHECA O POOL CERTO (executor.py:240-251):
+    - cripto (par com '/'): estimated_cost > non_marginable_buying_power -> barra.
+    - acao/ETF: estimated_cost > buying_power (pool marginavel) -> barra.
+    REPRODUZIDO (broker proprio): cripto 10k com caixa 5k mas BP 400k -> BARRADA no
+    pre-trade (antes nao barrava: checava BP e a Alpaca rejeitava server-side).
+    Acao 150k com caixa 100k mas BP 400k -> PASSA (margem). Acao 500k > BP 400k ->
+    barra. Pools discriminados corretamente.
+
+(C) PRE-TRADE BARRA CRIPTO QUE EXCEDE O CAIXA, GRACIOSO (sem crash):
+    REPRODUZIDO: caixa 1k, cripto-alvo 10k -> ex.execute() retorna None, broker
+    .submitted == [], sem excecao nao-tratada. E o compute_plan registra uma NOTA
+    auditavel ("cripto-alvo ... excede o caixa nao-marginavel ...") quando isso
+    ocorre (e NAO registra em operacao normal, cripto ~3-13% << caixa 100%). Esse
+    caso so aparece com caixa anomalo; a cripto-alvo nunca passa de 13.3% do equity.
+
+================================================================================
+ITEM 5 — REGRESSAO NOVA no caminho compartilhado (a prioridade)?  ===> NENHUMA
+================================================================================
+O Executor e o broker sao o caminho de execucao COMPARTILHADO (legado de acoes via
+agents/bus_agents.py:88 e orchestration/local_orchestrator.py:57; beta via
+strategies/beta_live.py:176). Verifiquei o impacto no fluxo legado:
+
+(a) NOVO RAMO DE VALIDACAO (executor.py:240-251) — INERTE p/ acoes:
+    o ramo de cripto so dispara p/ symbol com '/'. Simbolos legados (AAPL, SPY...)
+    NUNCA tem '/', entao caem no `elif estimated_cost > account.buying_power`, que e
+    BIT-A-BIT o codigo antigo (git HEAD confirmado). Nenhuma acao muda de veredito.
+(b) AccountInfo.non_marginable_buying_power tem DEFAULT = cash (base.py:89-93).
+    Brokers/contas que nao setam o campo se comportam como antes. O FakeBroker sem
+    margin_semantics retorna buying_power = cash (igual ao legado). Reproduzido o
+    teste do executor: acoes seguem validando contra o pool marginavel.
+(c) OUTRAS MUDANCAS DO CAMINHO COMPARTILHADO sao ADITIVAS e default-OFF:
+    - monitor.py: hook on_schedule_start opcional (default None -> legado), em
+      try/except que nunca derruba o loop.
+    - trailing_stop.py: kwarg excluded_symbols opcional (default set() -> legado).
+      Quando o BETA esta ON, main.py:286-298 o popula com o universo do beta p/ o
+      trailing-stop legado NAO liquidar o book vol-target numa queda de 10% (MF-1) —
+      e uma correcao de interacao entre books, nao uma regressao. Com flag OFF o set
+      e vazio e o trailing legado age como sempre.
+    - main.py: TODO o plug de beta esta atras de beta_live_enabled(); com a flag OFF
+      beta_orchestrator = orchestrator (sem wrapper), on_schedule_start = None,
+      excluded = set(). O Monitor recebe o orquestrador legado puro.
+(d) FLAG OFF == LEGADO: reproduzido — run_beta_rebalance_cycle -> {enabled:False,
+    executed:0}, broker.submitted == []; importar os modulos nao toca broker/dados/
+    scheduler. .env NAO define BETA_LIVE_ENABLED (=> OFF por padrao).
+
+=> NENHUMA regressao no sistema existente. O bucket/validacao novo nao afeta o fluxo
+   legado quando a flag esta OFF (e nem quando esta ON, p/ acoes — so muda cripto).
+
+================================================================================
+ITEM 6 — GUARDS / PARIDADE / BOOT / SUITE INTACTOS  ===> OK, REPRODUZIDO
+================================================================================
+GUARDS (config/risk.py:124/128/136/142) — reproduzidos contra o painel REAL e o
+motor REAL (run_portfolio_levered, 2.0x):
+  - PER-SYMBOL 210%: concentracao MAX legitima medida = 200.00%; dias > 210% = 0.
+    O teto fica acima do maximo legitimo -> so pega anomalia, preserva paridade. OK.
+  - DD-HALT 43%: MaxDD do backtest 2.0x = -25.37% (bate com o report); DD ao-vivo
+    estimado -36/-39%. -43% fica abaixo (nunca halta a operacao normal) e acima do
+    beta cru -> para num cisne negro. OK.
+  - DAILY-LOSS 8%: ver NOTA 1 abaixo (o pior dia REAL e -8.47%, 1 dia em 8357, e NAO
+    coincide com dia de rebalance). O halt so BLOQUEIA novas compras (can_open), NAO
+    liquida, e nao morde a operacao normal nem a paridade. OK como circuit breaker.
+  - HEAT 300%: inerte p/ o rebalance (current_heat=0). OK.
+PARIDADE de PESO: bit-a-bit vs backtest no painel REAL (tests de paridade RODARAM,
+nao pularam — cache presente). leverage_weights e parametro limpo; nucleo intacto.
+BOOT FLAT: NAV de boot = equity da conta / capital absoluto (positivo) -> guard
+nasce sadio; a 1a rebalanceada gera e executa ordens (reproduzido sob margem real).
+SUITE: 381 passed, 0 skipped, 0 xfailed. Os 14 testes novos de margem/cripto/
+financiamento passam e usam margin_semantics (2 pools), NAO o buying_power=9M que
+mascarava o gate na rodada anterior — o GAP DE TESTE que eu apontei foi FECHADO.
+
+================================================================================
+NOTAS (LOW — documentacao; NAO bloqueiam o go-live)
+================================================================================
+NOTA 1 [LOW, doc]: config/risk.py:97 diz "o PIOR dia em 27 anos de backtest foi
+  -5.67%". REPRODUZINDO com o motor REAL sobre o painel COMPLETO (1993..2026, 8357
+  dias): o pior dia a 2.0x e -8.47% (1998-08-31), seguido de -7.68% (1997-10-27).
+  O -5.67%/-5.69% e o pior da ERA RECENTE (2018-02-08), nao de toda a serie. Logo
+  HA exatamente 1 dia historico que tocaria o halt de -8% (e 2 dias < -6%). Por que
+  isso NAO e bloqueador: (i) o halt de daily-loss so impede ABRIR risco novo
+  (can_open), NAO liquida posicao; (ii) o beta so negocia no rebalance MENSAL e o
+  dia -8.47% (1998-08-31) NAO e dia de rebalance (r) nem r+1 — i.e., nao intersecta
+  a unica janela em que o vivo opera, entao nao quebra a paridade; (iii) 1/8357 =
+  0.012% e um evento de cauda extrema (~6-9 sigma) — exatamente o que um breaker
+  deve pegar. Recomendo so CORRIGIR o comentario (e o de "27 anos" -> 33 anos / pior
+  dia -8.47%) p/ a doc nao subestimar a cauda. Sem impacto em codigo.
+
+NOTA 2 [LOW, doc]: strategies/beta_rebalancer.py:38 e :77 dizem "gross medio
+  ~166%". O gross medio REAL no painel inteiro e 150.3% (a MEDIANA e 169%). O numero
+  superestima do lado conservador (mais emprestado do que o real) -> nao prejudica.
+  Corrigir o comentario p/ 150.3% medio quando for conveniente.
+
+PRE-CONDICAO OPERACIONAL (ja era go/no-go na rodada anterior, segue valendo):
+  A conta paper PRECISA ser MARGEM com Reg-T 2:1 PLENO (buying_power == 2x equity,
+  equity >= US$2.000). A 1a rebalanceada a 2.0x manda ate 200% gross; isso so cabe
+  com BP=2x. main.py loga buying_power/equity no boot — CONFIRME no go-live que
+  buying_power ~ 2x equity antes de ligar a flag. (Nao e bug; e checagem de conta.)
+
+================================================================================
+VEREDITO FINAL
+================================================================================
+*** SEGURO LIGAR a 2.0x (paper). ***
+
+O bloqueador de cripto/margem foi corrigido de forma DEFENSAVEL: a reserva de caixa
+(SELLs -> cripto -> acoes) e uma permutacao PURA (reproduzida em 2000 trials), a
+cripto agora EXECUTA a 2.0x e o book vivo = backtest (reproduzido ponta-a-ponta com
+2 pools fieis a Alpaca), o financiamento residual e ZERO no painel real (diff
+~2e-16), a validacao de 2 pools usa o campo REAL da Alpaca e barra a cripto de forma
+graciosa no pre-trade, e NAO ha regressao no caminho compartilhado (flag OFF ==
+legado bit-a-bit; o ramo de cripto so morde par com '/'). Guards, paridade,
+boot-flat e suite (381 verde, 0 skip) intactos.
+
+E DEFENSAVEL ligar BETA_LIVE_ENABLED=1 no PAPER agora p/ gravar o day-0 a 2.0x,
+desde que confirmado no boot que a conta paper e margem com buying_power ~ 2x equity
+(a pre-condicao operacional). Re-backtest NAO e necessario: o fix nao mexe em
+posicoes/pesos/alavancagem e o financiamento ja bate.
+
+Itens abertos: apenas 2 correcoes de COMENTARIO (pior dia -8.47% nao -5.67%; gross
+medio 150.3% nao 166%) — cosmeticas, sem efeito em comportamento. Limpo.
+================================================================================

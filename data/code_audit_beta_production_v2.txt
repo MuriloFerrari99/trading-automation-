@@ -1,0 +1,315 @@
+================================================================================
+RE-AUDITORIA ADVERSARIAL — CADEIA DE PRODUCAO DO BETA (portao final, rodada 2)
+Auditor: O CODER (independente, read-only). Data: 2026-06-15.
+Pergunta central: agora e SEGURO ligar BETA_LIVE_ENABLED e deixar rodar no paper
+Alpaca GRAVANDO o track record que vai embasar AUM?
+Metodo: NAO confiei na prosa do Executor — REPRODUZI cada correcao com o cache
+real e com o wiring REAL do main.py.
+================================================================================
+
+VEREDITO: ***AINDA NAO LIGAR.***
+
+Os 5 MUST-FIX da rodada 1 foram, eles proprios, CORRIGIDOS — reproduzi cada um e
+batem. POReM a correcao do MF-4 INTRODUZIU UM NOVO BLOQUEADOR CRITICO: numa conta
+FLAT (sem posicao de beta — que e exatamente o estado de go-live), o guard do beta
+se AUTO-HALTA no boot com uma perda diaria fantasma de -100%, e o halt e PEGAJOSO.
+Resultado reproduzido: a PRIMEIRA rebalanceada tem TODOS os longs-alvo bloqueados
+("trading halted") e o book NUNCA e construido. Ligar hoje grava um track record
+VAZIO/plano — o oposto do objetivo.
+
+Ha ainda UM achado ALTO de fidelidade (o feed de precos vivo NAO existe: o painel
+le um cache de disco que nunca e re-baixado; nenhum job o atualiza), que faz o
+rebalanceador parar de disparar/usar dados velhos assim que o cache envelhece —
+ou seja, o track record gravado nao reflete a estrategia auditada.
+
+LISTA DE BLOQUEADORES PARA LIGAR (must-fix desta rodada):
+  [NOVO-1 CRITICO] Boot-halt do guard do beta em conta flat (sleeve=0) — bloqueia
+                   a 1a rebalanceada. Introduzido pelo fix do MF-4.
+  [NOVO-2 ALTO]    Sem feed de dados vivo: load_production_panel le cache de disco
+                   com force=False e NADA o re-baixa. O 'asof' congela; o gatilho
+                   mensal deixa de disparar e/ou usa precos velhos.
+
+Com NOVO-1 e NOVO-2 resolvidos (e validados), os 5 MF originais ja estao em ordem
+e seria defensavel ligar em paper.
+
+================================================================================
+PARTE A — STATUS DE CADA MUST-FIX ORIGINAL (reproduzido, nao so lido)
+================================================================================
+
+--------------------------------------------------------------------------------
+[MF-1] Trailing-stop isenta o universo do beta — CORRIGIDO. (reproduzido)
+--------------------------------------------------------------------------------
+EVIDENCIA QUE EU MESMO RODEI (atraves do wiring REAL de build_app, nao do teste do
+Executor):
+  - Com BETA_LIVE_ENABLED=1, build_app(broker,"local") devolve um
+    _BetaRebalanceOrchestrator; a TrailingStopStrategy REALMENTE montada no pipeline
+    (orch._inner._planner._strategies) tem
+        _excluded = {BTC/USD, ETH/USD, GLD, IEF, QQQ, SLV, SPY, TLT}
+    == exatamente o UNIVERSE do beta na FORMA DO BROKER. (to_broker_symbol aplicado.)
+  - Seedei SPY (beta, +25%), BTC/USD (beta, +50%) e NVDA (nao-beta, +20%) e chamei
+    evaluate() com o mercado de ACOES FECHADO:
+        SPY  -> NENHUMA ordem (pulado).
+        BTC/USD -> NENHUMA ordem, MESMO 24/7 (pula ANTES do ramo cripto).
+        NVDA -> recebe trailing_stop quando o mercado abre (protecao legitima intacta).
+  - Com a flag OFF: build_app devolve LocalOrchestrator puro, _excluded == {} (vazio),
+    e SPY VOLTA a receber o trailing legado ("protege todo long"). Comportamento
+    legado IDENTICO.
+  O skip esta ANTES de qualquer logica (trailing_stop.py:62-64: `if symbol.upper()
+  in self._excluded: continue`). Confirmado.
+
+--------------------------------------------------------------------------------
+[MF-2] Gatilho dispara em r+1, nao r; paridade bit-a-bit preservada — CORRIGIDO.
+--------------------------------------------------------------------------------
+EVIDENCIA (cache real, 8401 dias, 42 viradas de mes desde 2023, 0 falhas):
+  - _rebalance_timing_ready(panel, r)   = False  (defere no 1o pregao do mes)
+    _rebalance_timing_ready(panel, r+1) = True   (libera no 2o pregao = onde os
+    pesos do backtest entram em vigor por causa do .shift(1)).
+  - PARIDADE: target_weights_for_date(asof=r+1) vs production_weight_frame.loc[r+1]
+    = 0.00e+00 (BIT-A-BIT) em todas as 42 viradas.
+  - Prova do bug antigo: target_weights_for_date(asof=r) == wf.loc[r] == pesos do
+    MES ANTERIOR. Logo, disparar em r (comportamento antigo) negociaria o alvo velho.
+  - State-machine end-to-end (com estado persistido, mes anterior marcado):
+        plan_if_due(asof=r)   -> None  (deferido por timing; mes NAO marcado -> nao
+                                        perde a rebalanceada)
+        plan_if_due(asof=r+1) -> plano cujo target == wf.loc[r+1] (NOVO) e != wf.loc[r]
+    Ex. 2024-09: wf[r] tinha BTC-USD 0.058; wf[r+1] zera BTC e sobe IEF/GLD —
+    o vivo agora negocia wf[r+1], como o backtest.
+  - SEM look-ahead apos o fix (reproduzido): perturbar barras futuras -> 0.0;
+    perturbar a barra do proprio asof -> 0.0 (.shift(1) usa <= asof-1); perturbar a
+    janela passada -> 0.69 (usa o passado legitimamente). _rebalance_timing_ready
+    nao depende de linhas futuras (cut == full).
+
+  RESSALVA (informativa, NAO bloqueia; mesma classe do MF-5): no vivo, asof =
+  ultima barra FECHADA do painel. Se o sistema acordar no DIA r+1 antes do fechamento,
+  a ultima barra do painel ainda e r => timing nao pronto => defere mais 1 dia e
+  rebalanceia em r+2 com asof=r+1. Os PESOS continuam corretos (sempre wf[r+1]);
+  o que varia e a DATA de execucao (+1 dia eventual). Erro de 2a ordem, declarado.
+
+--------------------------------------------------------------------------------
+[MF-3] Cripto roteia certo (feed/normalizacao/TIF) — CORRIGIDO (rota); latente.
+--------------------------------------------------------------------------------
+Hoje o alvo de BTC-USD/ETH-USD = 0.0 e ficou 0 nos ultimos 120 dias (verificado),
+entao isto NAO dispara agora. O Executor optou pela correcao FORTE (rotear cripto),
+nao pelo fail-closed que eu havia sugerido. Reproduzi:
+  (3a/3b) get_last_price/get_bars roteiam por '/' para CryptoLatestTradeRequest/
+          get_crypto_latest_trade e CryptoBarsRequest/get_crypto_bars; e NAO fazem
+          .upper() no simbolo de cripto (preserva 'BTC/USD'). A API alpaca-py
+          referenciada EXISTE (conferi: CryptoHistoricalDataClient.get_crypto_*).
+  (3c) _normalize_crypto_symbol('BTCUSD') -> 'BTC/USD'; 'BTC/USD' intacto; 'AAPL'/
+       'SPY'/'SLV' intactos. _to_position normaliza no lado da Alpaca, entao o
+       lookup do rebalancer positions.get('BTC/USD') ACERTA. Reproduzi o NAO-double-buy:
+       com BTC/USD ja no alvo, o plano NAO emite ordem de BTC (skipped_in_band).
+  (3d) _build_order_request forca ATIF.GTC para cripto INDEPENDENTE do TIF do intent
+       (que vem DAY). O OrderIntent de cripto carrega DAY, o Executor nao mexe no
+       TIF, e a coercao GTC acontece na fronteira da rede (broker) — lugar certo.
+
+  RISCO RESIDUAL (latente, severidade BAIXA->MEDIA quando crypto>0):
+   - As rotas de cripto NUNCA rodaram contra a API real (so dispatch estatico
+     verificado). O 1o trade de cripto vivo exercitara get_crypto_latest_trade,
+     get_crypto_bars, arredondamento de lote fracionario e GTC pela 1a vez. Como
+     crypto=0 hoje, NAO bloqueia o go-live em paper; mas antes de o vol-target
+     alocar cripto, faca um smoke-test vivo de UMA ordem de cripto.
+   - _normalize_crypto_symbol e heuristico (qualquer simbolo sem '/' terminando em
+     USD/USDT/USDC/BTC/ETH vira par). Para o universo do beta (SPY/QQQ/TLT/IEF/GLD/
+     SLV) e seguro (nenhum termina nessas quotes). So seria problema se a conta
+     carregasse um ticker de acao terminando em "BTC"/"ETH" etc. Improvavel; anotado.
+
+--------------------------------------------------------------------------------
+[MF-4] Envelope de risco isolado (sleeve + chaves proprias) — CORRIGIDO no
+       ISOLAMENTO, mas o fix INTRODUZIU O BLOQUEADOR NOVO-1 (ver Parte B).
+--------------------------------------------------------------------------------
+ISOLAMENTO reproduzido e CORRETO:
+  (a) Tombo do book de ACOES (-50% em AAPL) NAO halta o beta: alimentei o guard com
+      beta_sleeve_equity (so SPY, inalterado em 50k) -> trading_halted == False.
+  (b) Tombo do BETA (-40% em SPY, sleeve 50k->30k) HALTA o beta (DD -40% > -28%).
+  (c) Chaves: _build_beta_guard usa 'beta:risk_peak_equity' e
+      'beta:risk_start_equity:{today}'. Pre-semeei as chaves das ACOES
+      (risk_peak_equity=999999, risk_start_equity=888888) e, apos rodar o guard do
+      beta, elas ficaram INTACTAS. beta_sleeve_equity exclui posicoes nao-beta.
+  Logo o objetivo do MF-4 (desacoplar os halts) foi atingido para o SLEEVE.
+
+  POReM dois problemas remanescem:
+   - NOVO-1 (CRITICO, abaixo): o boot em conta flat se auto-halta.
+   - ISOLAMENTO INCOMPLETO (MEDIO, latente): o MF-4 isolou o EQUITY DO GUARD, mas
+     o DIMENSIONAMENTO ainda usa o equity TOTAL da conta. compute_plan usa
+     broker.get_account().equity (beta_rebalancer.py:370) como denominador do peso
+     atual E do notional-alvo. Reproduzi: com uma posicao de acoes de 500k inflando
+     o equity para 1M, o beta dimensiona SPY = peso(1.5x) * 1M (qty 2600), como se
+     o sleeve do beta possuisse a conta inteira. Em paper SO-BETA (sem posicoes de
+     acoes — o config de go-live), equity == sleeve e o dimensionamento e CORRETO.
+     Mas se as acoes operarem junto, os dois books se sobrepoem no mesmo capital e o
+     gross combinado estoura a alavancagem pretendida; o NAV do beta deixa de ser um
+     sleeve limpo. Para um track record que vende AUM, dimensionar o beta sobre o
+     SLEEVE (nao o total) deixaria a serie limpa. NAO bloqueia o paper beta-only.
+
+--------------------------------------------------------------------------------
+[MF-5] Rebalance so perto do fechamento; fora da janela DEFERE sem marcar o mes —
+       CORRIGIDO. (reproduzido)
+--------------------------------------------------------------------------------
+EVIDENCIA (com executor stub, cache real, asof=r+1 devido):
+  - _is_near_close: 120 min p/ close + mercado aberto -> False; 10 min -> True;
+    mercado FECHADO -> False (nao dispara em fim de semana via cripto 24/7).
+  - FORA da janela (120 min): retorno {due:True, deferred_to_close:True, executed:0};
+    executor NAO chamado; mes NAO marcado (continua no mes anterior) -> rebalanceada
+    NAO perdida.
+  - FIM DE SEMANA/FECHADO (armadilha 24/7): deferido, executor nao chamado, mes nao
+    marcado.
+  - DENTRO da janela (10 min): executa (4 ordens via stub), mes marcado para r+1.
+  - 2o ciclo no mesmo mes: due == False (idempotente), executor nao re-chamado.
+  Politica fail-open (sem relogio -> assume janela) e fail-safe (fechado -> nao
+  dispara) sao coerentes e estao no codigo (beta_live.py:69-95).
+
+================================================================================
+PARTE B — ACHADOS NOVOS (introduzidos/expostos pelas correcoes)
+================================================================================
+
+================================================================================
+[NOVO-1] CRITICO / BLOQUEADOR — Guard do beta se AUTO-HALTA no boot em conta FLAT
+         (sleeve=0), bloqueando a PRIMEIRA rebalanceada. (regressao do fix do MF-4)
+================================================================================
+ARQUIVOS: main.py:144-155 (_build_beta_guard) ; risk/portfolio_guard.py:48-51 (update).
+
+O QUE ACONTECE (PROVADO, reproduzido ponta a ponta):
+  - No go-live a conta esta FLAT: nenhuma posicao do beta ainda -> beta_sleeve_equity
+    (broker) = 0.
+  - _build_beta_guard: start_equity = sleeve = 0; ao construir o guard, coage
+    start_equity para Decimal("1") (main.py:147) "para manter o guard inerte". Em
+    seguida chama guard.update(sleeve_equity) = guard.update(0) (main.py:155).
+  - Em PortfolioRiskGuard.update (portfolio_guard.py:48-51): como start_equity (=1)
+    > 0, calcula daily_pl = (0 - 1)/1 = -100% e dispara o halt de perda diaria
+    (limite -6%). O guard nasce HALTADO.
+  - O comentario em main.py:145-146 esta FACTUALMENTE ERRADO: afirma "o update() so
+    engaja halt com equity>0 e peak>0". O ramo de perda DIARIA depende de
+    start_equity>0, NAO de equity>0. A coercao para start=1 e justamente o que
+    dispara o halt fantasma.
+
+  REPRODUCAO 1 (boot direto):
+    broker flat -> _build_beta_guard -> guard.trading_halted == True
+      | halt_reason = "daily loss limit atingido (-100.00%)".
+  REPRODUCAO 2 (o halt e PEGAJOSO e a 1a rebalanceada e bloqueada):
+    Mesmo depois que o sleeve passa a ter valor (posicao aparece), guard.update(...)
+    nao reabilita: trading_halted continua True (in-memory, nunca reseta no processo).
+    Rodei a 1a rebalanceada com esse guard:
+        plan.intents = []   (nenhum BUY sobrevive)
+        plan.blocked = ['SPY (trading halted ...)', 'QQQ (...)', 'IEF (...)', 'GLD (...)']
+    => o book NUNCA e construido. O paper grava um track record VAZIO.
+  REPRODUCAO 3 (persiste entre restarts): beta:risk_start_equity fica gravado = 0;
+    em todo restart enquanto a conta estiver flat, start e re-coagido para 1 e o
+    update(0) re-halta. Nao ha caminho de recuperacao DENTRO do processo (conta
+    flat: nada para vender; todo BUY barrado).
+
+  POR QUE OS TESTES NAO PEGARAM: todos os test_mf4_* SEEDAM uma posicao de beta
+  (sleeve 100k) ANTES de montar o guard. NENHUM exercita o boot em conta FLAT
+  (sleeve=0) — que e o estado de go-live. A suite fica verde por nao cobrir o
+  caminho que quebra.
+
+  SEVERIDADE: CRITICA. Defeita o proprio ato de ligar a flag (a 1a rebalanceada).
+  CORRECAO (sugestao): NAO chamar guard.update quando sleeve_equity <= 0 (deixar o
+  guard genuinamente inerte ate haver sleeve), OU passar start_equity=0 quando o
+  sleeve e 0 (o ramo de perda diaria ja e pulado por start<=0) e so engajar o halt
+  quando houver equity real. Adicionar um teste de boot FLAT (sleeve=0) que afirma
+  trading_halted == False e que a 1a rebalanceada produz os BUYs do alvo.
+
+================================================================================
+[NOVO-2] ALTO — Sem feed de dados VIVO: o painel le cache de disco que ninguem
+         re-baixa; o 'asof' congela e o rebalanceador deixa de disparar/usa dado velho.
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:470-476 (load_production_panel ->
+          load_panel(force=False)) ; beta_live.py:136-145 (asof = ultima barra) ;
+          main.py:341-343 (so agenda captura EOD; NENHUM job de refresh de precos).
+
+O QUE ACONTECE:
+  - run_beta_rebalance_cycle carrega load_production_panel() a cada tick, que chama
+    load_panel(force=False) — le data/beta_cache/*.csv. NUNCA re-baixa.
+  - Procurei em strategies/, main.py e reporting/: NAO existe nenhum job/cron que
+    chame load_panel(force=True) nem qualquer refresh do cache. O unico job agendado
+    e schedule_eod_capture (snapshot de NAV — nao toca precos).
+  - Hoje o cache esta fresco (mtime 2026-06-15; ultima data 2026-06-15) porque alguem
+    rodou o backtest a mao. Em operacao continua, o asof = panel.index[-1] CONGELA no
+    ultimo close cacheado.
+  CONSEQUENCIA:
+   - A deteccao de virada de mes (_rebalance_timing_ready/is_rebalance_due) opera num
+     index congelado: conforme o tempo real entra em um mes novo, o painel nunca ganha
+     os primeiros pregoes desse mes -> o gatilho mensal NAO dispara (ou dispara sobre
+     dado velho). Reproduzido conceitualmente: o asof vivo e a ultima linha do cache.
+   - Mesmo se disparasse, os pesos viriam de precos velhos -> divergem do backtest.
+   - O proprio docstring admite: "Em producao real, este e o ponto a trocar por um
+     feed de dados ao vivo equivalente" — ou seja, e um TODO conhecido, ainda nao ligado.
+  NOTA: a serie de NAV (capture EOD) usa broker.get_account().equity (marcas reais da
+  Alpaca), entao o NAV gravado e real; o problema e que a ESTRATEGIA para de
+  rebalancear corretamente -> o track record nao reflete a estrategia auditada.
+  SEVERIDADE: ALTA para fidelidade do track record. Nao "explode" a conta (tende a
+  NAO negociar conforme o cache envelhece), mas invalida o proposito (gravar o
+  comportamento auditado).
+  CORRECAO (sugestao): agendar um refresh diario do painel (load_panel(force=True))
+  ANTES da janela de close, OU trocar load_production_panel por um feed vivo
+  equivalente, mantendo a IDENTIDADE de calculo com o backtest (o teste de paridade
+  deve continuar valendo sobre o feed novo).
+
+================================================================================
+PARTE C — REGRESSAO (itens pedidos)
+================================================================================
+[OK] FakeBroker.buying_power: ADITIVO e seguro. Default None -> buying_power == cash
+     (legado, reproduzido). Explicito -> modela margem; equity inalterado. Consumidor
+     real: executor.py:225 (estimated_cost > buying_power) — necessario porque o book
+     1.5x deixa o caixa negativo; sem buying_power>cash o Executor barraria as compras
+     alavancadas. O teste legado test_validation_blocks_insufficient_buying_power usa
+     o default -> NAO mascarado. O AlpacaBroker.get_account reporta acct.buying_power
+     real da Alpaca, entao a validacao tambem funciona vivo. Confirmado.
+
+[OK] FLAG OFF e IDENTICA ao legado (reproduzido end-to-end): beta_live_enabled()==False;
+     build_app -> LocalOrchestrator; monitor._on_schedule_start is None;
+     run_beta_rebalance_cycle -> {enabled:False} com 0 chamadas ao executor;
+     schedule_eod_capture -> False com 0 jobs; broker intocado; TrailingStop._excluded
+     vazio. Importar beta_live/beta_rebalancer nao baixa dados nem toca o broker.
+
+[OK] SUITE COMPLETA: 342 passed (reproduzido 3x). Sem skips/xfails relevantes. Os
+     testes novos de MF-1 (3) e MF-4 (4) passam. RESSALVA: a suite NAO cobre o boot
+     em conta FLAT (NOVO-1) — por isso fica verde apesar do bloqueador.
+
+[NOVOS BUGS introduzidos pelos fixes — encontrados]:
+  - NOVO-1 (CRITICO): regressao do fix do MF-4 (boot-halt em conta flat). Estado +
+    ordem de execucao: guard.update(0) no boot engaja o halt e ele e pegajoso.
+  - Isolamento de dimensionamento incompleto (MEDIO/latente): o fix do MF-4 isolou o
+    equity do GUARD mas nao o do DIMENSIONAMENTO (compute_plan ainda usa equity total).
+  - Look-ahead: NENHUM novo (reproduzido: timing fix nao introduz peek de futuro).
+  - Ordem/estado no MF-2/MF-5: corretos (deferir nao marca o mes; marcar so pos-exec).
+
+================================================================================
+PARTE D — O QUE CONTINUA CORRETO (verificado, nao so lido)
+================================================================================
+[OK] Paridade vivo == backtest BIT-A-BIT (0.0) em 42 viradas de mes (MF-2 nao quebrou).
+[OK] Sem look-ahead na funcao de peso e no gate de timing (perturbacao de futuro -> 0).
+[OK] Banda de nao-trade, diff de ordens, idempotencia mensal, marca so pos-exec,
+     deferir-sem-marcar, kill switch/guard barram BUY e liberam SELL: reproduzidos.
+[OK] Guard calibrado (DD -28%, daily -6%, per-symbol 60%): niveis defensaveis; o
+     PROBLEMA do guard agora e o boot-halt (NOVO-1), nao a calibracao.
+[OK] Isolamento de halt entre books (sleeve + chaves proprias): reproduzido nos 2
+     sentidos; chaves das acoes intactas.
+[OK] Rota de cripto/normalizacao/TIF: dispatch correto e API alpaca-py existe.
+[OK] FakeBroker buying_power aditivo; flag-off inerte; 342 testes verdes.
+
+================================================================================
+RESUMO EXECUTIVO
+================================================================================
+Os 5 must-fix originais ESTAO corrigidos e eu os reproduzi (MF-1 atraves do wiring
+real; MF-2 bit-a-bit em 42 viradas + state-machine; MF-3 rota/normalizacao/TIF/
+no-double-buy; MF-4 isolamento nos 2 sentidos + chaves; MF-5 defer/marca/idempotencia).
+
+MAS NAO LIGAR ainda, por DOIS motivos:
+  1. [NOVO-1 CRITICO] A correcao do MF-4 fez o guard do beta se auto-haltar no boot
+     em conta FLAT (sleeve=0), e o halt e pegajoso -> a PRIMEIRA rebalanceada tem
+     todos os longs bloqueados e o book nunca e construido. Isto sozinho transforma
+     o go-live num track record vazio. Correcao trivial (nao chamar update com
+     sleeve<=0 / start=0 quando flat) + teste de boot flat.
+  2. [NOVO-2 ALTO] Nao ha feed de precos vivo: o painel le um cache de disco que
+     ninguem re-baixa; o asof congela e o rebalanceador deixa de disparar/usa dado
+     velho. O track record gravado nao reflete a estrategia auditada.
+
+Depois disso, dois itens MEDIOS/latentes a endercar (nao bloqueiam paper beta-only):
+  - Dimensionar o beta sobre o SLEEVE (nao o equity total) — o MF-4 so isolou o guard.
+  - Smoke-test de UMA ordem de cripto vivo antes de o vol-target alocar cripto>0.
+
+Com NOVO-1 e NOVO-2 resolvidos e validados, e DEFENSAVEL ligar em paper para gravar
+o baseline. Como esta hoje: AINDA NAO.
+================================================================================

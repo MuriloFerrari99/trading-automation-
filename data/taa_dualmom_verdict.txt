@@ -1,0 +1,116 @@
+==============================================================================
+VEREDITO — DUAL MOMENTUM / TAA (absolute + relative, Faber/GTAA)
+==============================================================================
+
+DATA STATUS: real
+Janela (comum, broad vivo): 2007-05-30..2026-06-17  (230 meses)
+n_trials (honesto): 80  (lookbacks 5 x top_N 4 x defensivo 2 x universos 2)
+
+--- TODAS AS CONFIGS (Sharpe ann, CAGR, MaxDD; custo ESTRESSADO 2x) ---
+  broad8_L6_N4_AGG       Sharpe=  1.17  CAGR= 12.15%  MaxDD= -13.55%
+  broad8_L6_N4_IEF       Sharpe=  1.15  CAGR= 12.18%  MaxDD= -14.62%
+  broad8_L3_N4_IEF       Sharpe=  1.04  CAGR= 11.77%  MaxDD= -18.18%
+  broad8_L3_N3_IEF       Sharpe=  1.03  CAGR= 12.82%  MaxDD= -22.31%
+  broad8_L3_N4_AGG       Sharpe=  1.02  CAGR= 11.41%  MaxDD= -20.06%
+  broad8_L3_N3_AGG       Sharpe=  1.02  CAGR= 12.56%  MaxDD= -22.85%
+  core5_L6_N3_AGG        Sharpe=  0.97  CAGR=  9.45%  MaxDD= -11.45%
+  broad8_L6_N3_AGG       Sharpe=  0.95  CAGR= 11.09%  MaxDD= -15.81%
+  broad8_L6_N3_IEF       Sharpe=  0.94  CAGR= 11.10%  MaxDD= -16.90%
+  core5_L6_N3_IEF        Sharpe=  0.94  CAGR=  9.30%  MaxDD= -12.81%
+  broad8_L9_N4_AGG       Sharpe=  0.93  CAGR= 10.04%  MaxDD= -24.17%
+  broad8_L10_N4_AGG      Sharpe=  0.91  CAGR=  9.76%  MaxDD= -18.93%
+  broad8_L9_N3_AGG       Sharpe=  0.90  CAGR=  9.97%  MaxDD= -22.42%
+  broad8_L9_N4_IEF       Sharpe=  0.90  CAGR=  9.85%  MaxDD= -23.65%
+  broad8_L10_N4_IEF      Sharpe=  0.89  CAGR=  9.65%  MaxDD= -18.17%
+  core5_L9_N2_AGG        Sharpe=  0.89  CAGR= 10.30%  MaxDD= -23.18%
+  broad8_L9_N3_IEF       Sharpe=  0.87  CAGR=  9.76%  MaxDD= -22.42%
+  core5_L3_N2_AGG        Sharpe=  0.86  CAGR= 10.50%  MaxDD= -23.58%
+  core5_L3_N2_IEF        Sharpe=  0.86  CAGR= 10.68%  MaxDD= -22.56%
+  core5_L9_N2_IEF        Sharpe=  0.86  CAGR= 10.12%  MaxDD= -23.18%
+  core5_L3_N3_IEF        Sharpe=  0.85  CAGR=  9.09%  MaxDD= -17.60%
+  broad8_L10_N3_AGG      Sharpe=  0.85  CAGR=  9.69%  MaxDD= -22.42%
+  core5_L3_N3_AGG        Sharpe=  0.85  CAGR=  8.82%  MaxDD= -19.34%
+  broad8_L3_N2_IEF       Sharpe=  0.84  CAGR= 11.79%  MaxDD= -34.82%
+  broad8_L3_N2_AGG       Sharpe=  0.83  CAGR= 11.61%  MaxDD= -35.32%
+  broad8_L10_N3_IEF      Sharpe=  0.83  CAGR=  9.57%  MaxDD= -22.42%
+  core5_L6_N2_AGG        Sharpe=  0.82  CAGR=  9.17%  MaxDD= -16.26%
+  core5_L6_N4_AGG        Sharpe=  0.81  CAGR=  7.02%  MaxDD= -12.78%
+  broad8_L9_N2_AGG       Sharpe=  0.81  CAGR= 10.27%  MaxDD= -27.37%
+  core5_L6_N2_IEF        Sharpe=  0.79  CAGR=  8.98%  MaxDD= -15.94%
+  broad8_L12_N4_AGG      Sharpe=  0.79  CAGR=  8.72%  MaxDD= -18.93%
+  broad8_L9_N2_IEF       Sharpe=  0.78  CAGR= 10.06%  MaxDD= -27.37%
+  core5_L6_N4_IEF        Sharpe=  0.78  CAGR=  7.01%  MaxDD= -14.11%
+  core5_L10_N3_AGG       Sharpe=  0.77  CAGR=  7.59%  MaxDD= -16.83%
+  broad8_L12_N4_IEF      Sharpe=  0.77  CAGR=  8.65%  MaxDD= -18.17%
+  broad8_L12_N3_AGG      Sharpe=  0.76  CAGR=  9.05%  MaxDD= -22.42%
+  broad8_L12_N3_IEF      Sharpe=  0.75  CAGR=  8.99%  MaxDD= -22.42%
+  core5_L10_N4_AGG       Sharpe=  0.75  CAGR=  6.47%  MaxDD= -14.60%
+  broad8_L6_N2_AGG       Sharpe=  0.74  CAGR=  9.76%  MaxDD= -21.66%
+  core5_L3_N4_IEF        Sharpe=  0.74  CAGR=  7.01%  MaxDD= -16.65%
+  core5_L9_N3_AGG        Sharpe=  0.74  CAGR=  7.69%  MaxDD= -25.49%
+  core5_L3_N4_AGG        Sharpe=  0.74  CAGR=  6.74%  MaxDD= -17.20%
+  broad8_L6_N2_IEF       Sharpe=  0.74  CAGR=  9.72%  MaxDD= -21.66%
+  core5_L10_N3_IEF       Sharpe=  0.73  CAGR=  7.28%  MaxDD= -15.68%
+  core5_L9_N4_AGG        Sharpe=  0.72  CAGR=  6.51%  MaxDD= -20.16%
+  core5_L9_N3_IEF        Sharpe=  0.71  CAGR=  7.45%  MaxDD= -24.80%
+  core5_L10_N4_IEF       Sharpe=  0.71  CAGR=  6.23%  MaxDD= -15.52%
+  core5_L9_N4_IEF        Sharpe=  0.69  CAGR=  6.31%  MaxDD= -18.81%
+  broad8_L10_N2_AGG      Sharpe=  0.68  CAGR=  9.01%  MaxDD= -33.83%
+  broad8_L10_N2_IEF      Sharpe=  0.68  CAGR=  8.97%  MaxDD= -33.83%
+  core5_L12_N3_AGG       Sharpe=  0.67  CAGR=  6.73%  MaxDD= -17.27%
+  core5_L10_N2_AGG       Sharpe=  0.64  CAGR=  7.29%  MaxDD= -23.18%
+  core5_L12_N3_IEF       Sharpe=  0.64  CAGR=  6.48%  MaxDD= -18.37%
+  core5_L12_N4_AGG       Sharpe=  0.63  CAGR=  5.75%  MaxDD= -18.49%
+  core5_L10_N2_IEF       Sharpe=  0.62  CAGR=  7.09%  MaxDD= -23.18%
+  broad8_L12_N1_IEF      Sharpe=  0.60  CAGR=  9.63%  MaxDD= -44.40%
+  broad8_L12_N1_AGG      Sharpe=  0.60  CAGR=  9.57%  MaxDD= -44.40%
+  core5_L12_N4_IEF       Sharpe=  0.60  CAGR=  5.54%  MaxDD= -18.49%
+  core5_L12_N2_AGG       Sharpe=  0.58  CAGR=  6.64%  MaxDD= -23.18%
+  broad8_L12_N2_IEF      Sharpe=  0.58  CAGR=  7.47%  MaxDD= -32.88%
+  broad8_L12_N2_AGG      Sharpe=  0.57  CAGR=  7.36%  MaxDD= -32.88%
+  core5_L12_N2_IEF       Sharpe=  0.56  CAGR=  6.40%  MaxDD= -23.18%
+  core5_L10_N1_IEF       Sharpe=  0.51  CAGR=  7.29%  MaxDD= -43.30%
+  core5_L10_N1_AGG       Sharpe=  0.51  CAGR=  7.28%  MaxDD= -43.30%
+  broad8_L10_N1_IEF      Sharpe=  0.51  CAGR=  7.75%  MaxDD= -43.30%
+  broad8_L10_N1_AGG      Sharpe=  0.51  CAGR=  7.74%  MaxDD= -43.30%
+  core5_L3_N1_AGG        Sharpe=  0.50  CAGR=  7.65%  MaxDD= -48.03%
+  core5_L6_N1_AGG        Sharpe=  0.50  CAGR=  6.94%  MaxDD= -23.13%
+  core5_L3_N1_IEF        Sharpe=  0.50  CAGR=  7.51%  MaxDD= -48.03%
+  core5_L6_N1_IEF        Sharpe=  0.49  CAGR=  6.86%  MaxDD= -23.09%
+  broad8_L9_N1_AGG       Sharpe=  0.49  CAGR=  7.56%  MaxDD= -44.40%
+  broad8_L9_N1_IEF       Sharpe=  0.49  CAGR=  7.54%  MaxDD= -44.40%
+  broad8_L3_N1_AGG       Sharpe=  0.49  CAGR=  7.74%  MaxDD= -47.45%
+  broad8_L3_N1_IEF       Sharpe=  0.48  CAGR=  7.64%  MaxDD= -47.45%
+  broad8_L6_N1_AGG       Sharpe=  0.48  CAGR=  7.19%  MaxDD= -36.14%
+  broad8_L6_N1_IEF       Sharpe=  0.47  CAGR=  7.11%  MaxDD= -36.14%
+  core5_L9_N1_AGG        Sharpe=  0.45  CAGR=  6.33%  MaxDD= -43.30%
+  core5_L9_N1_IEF        Sharpe=  0.45  CAGR=  6.31%  MaxDD= -43.30%
+  core5_L12_N1_IEF       Sharpe=  0.34  CAGR=  4.32%  MaxDD= -43.30%
+  core5_L12_N1_AGG       Sharpe=  0.34  CAGR=  4.28%  MaxDD= -43.30%
+
+--- MELHOR CONFIG IN-SAMPLE (a que o data-snooping escolheria) ---
+  config        : broad8_L6_N4_AGG
+  Sharpe (2x)   : 1.168
+  CAGR (2x)     : 12.15%
+  MaxDD (2x)    : -13.55%
+
+--- BENCHMARK 60/40 (SPY/IEF, mesma janela, mesmo custo) ---
+  Sharpe        : 0.9
+  CAGR          : 8.36%
+  MaxDD         : -28.17%
+
+--- TRIBUNAL ESTATISTICO (anti-overfitting) ---
+  DSR           : 0.9988   (barra >= 0.95)
+  PSR           : 1.0
+  PBO (CSCV)    : 0.1762   (barra < 0.5)
+  corr c/ SPY   : 0.6329
+  [PASSA] Sharpe_anual=1.17 (obstaculo data-snooping=0.45) | PSR=1.000 DSR=0.999 | n=230 trials=80 skew=0.00 kurt=2.99
+
+--- DECISAO ---
+  bate 60/40?      True
+  diversifica?     True (|corr|<=0.7 E MaxDD melhor E Sharpe>=60/40)
+  passes_dsr?      True
+  passes_sharpe?   True
+
+  >>> PASSA NA BARRA: True
+==============================================================================

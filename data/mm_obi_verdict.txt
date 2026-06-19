@@ -1,0 +1,60 @@
+==============================================================================
+TRIBUNAL — Market-making cripto com order-book imbalance (OBI)
+==============================================================================
+
+Estrategia: MM passivo top-of-book em BTCUSDT perp, skew por OBI.
+Dado: Binance bookTicker historico (nivel-1, gratis, data.binance.vision).
+  L2 profundo NAO e gratis -> modelamos MM de TOP-OF-BOOK (unica versao
+  honestamente backtestavel de graca).
+Fee maker: 1.8bps base / 3.6bps ESTRESSE (usado no veredito).
+Anti-look-ahead: OBI de t decide quote; PnL marcado contra mid_{t+1}.
+Fill conservador: so enche quando o mercado atravessa nosso nivel (= adverse selection real).
+
+------------------------------------------------------------------------------
+AMOSTRA
+------------------------------------------------------------------------------
+Dias (esparsos 2023-06..2024-03): 2023-06-15, 2023-08-15, 2023-10-15, 2023-12-15, 2024-01-15, 2024-02-15, 2024-03-15, 2024-03-29
+n_trials honesto (variantes x modelos de fill): 32
+
+------------------------------------------------------------------------------
+MODELO DE FILL: CONSERVADOR (pessimista, fill so quando o preco atravessa = adverse selection puro)  (custo ESTRESSADO 2x, melhor de N variantes)
+------------------------------------------------------------------------------
+melhor skew: OBI>= 0.7 quota bid ; OBI<= 0.3 quota ask
+snapshots: 691,151  periodos 1h: 184
+fills: 34,166  fill-rate/snapshot: 4.943%
+Sharpe anual liquido: -71.33  (obstaculo data-snooping: 3.03)
+PSR: 0.000   DSR: 0.000   (barra DSR>=0.95)
+PBO (CSCV): 0.000   (barra <0.5)
+CAGR (extrapolado): -100.0%   MaxDD: -100.0%
+skew=-2.38  kurtose=8.93
+Sharpes anuais das 16 variantes: min=-76.65 med=-74.34 max=-71.33
+-> FALHA
+
+------------------------------------------------------------------------------
+MODELO DE FILL: QUEUE-PRIORITY (otimista-defensavel, fill quando o nivel segura)  (custo ESTRESSADO 2x, melhor de N variantes)
+------------------------------------------------------------------------------
+melhor skew: OBI>= 0.7 quota bid ; OBI<= 0.4 quota ask
+snapshots: 691,151  periodos 1h: 184
+fills: 328,011  fill-rate/snapshot: 47.459%
+Sharpe anual liquido: -259.54  (obstaculo data-snooping: 5.67)
+PSR: 0.000   DSR: 0.000   (barra DSR>=0.95)
+PBO (CSCV): 0.183   (barra <0.5)
+CAGR (extrapolado): -100.0%   MaxDD: -100.0%
+skew=0.59  kurtose=2.86
+Sharpes anuais das 16 variantes: min=-268.38 med=-264.36 max=-259.54
+-> FALHA
+
+==============================================================================
+VEREDITO FINAL: FALHA
+==============================================================================
+Interpretacao: o resultado REAL fica entre os dois modelos de fill. O
+conservador e a cota inferior (sempre adversamente selecionado); o queue
+e a cota superior (assume prioridade de fila que o dado nivel-1 nao prova).
+Nem o melhor caso (queue-priority, custo estressado, melhor de N) bate a barra:
+  Motivo (queue): DSR 0.000 < 0.95; Sharpe -259.54 < 0.8
+
+LIMITE DE DADO: L2 profundo (queue real, depth>1) NAO e gratis. bookTicker
+(nivel-1) so cobre 2023-05..2024-04; Binance parou de publicar depois. Para
+um teste de MM com queue priority VERDADEIRA seria preciso coletar L2 ao vivo
+(coletor pronto em simulation/binance_book.py --collect) por meses.
+------------------------------------------------------------------------------

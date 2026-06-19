@@ -1,0 +1,53 @@
+==============================================================================
+TRIBUNAL — TSMOM cross-asset (Trend-following / Managed-futures)
+==============================================================================
+Periodo: 2008-09-08 .. 2026-06-17  |  n_obs=4472
+Universo: 16 ETFs total-return  |  variante campea: 6m
+n_trials (honesto, base+stress): 12
+
+--- TRIBUNAL ESTATISTICO (cenario ESTRESSADO 2x custo) ---
+[FALHA] Sharpe_anual=0.46 (obstaculo data-snooping=0.41) | PSR=0.974 DSR=0.581 | n=4472 trials=12 skew=-0.03 kurt=11.41
+PBO (CSCV) = 0.374   (< 0.5 aceitavel; menor = mais robusto)
+
+--- PERFORMANCE (variante campea) ---
+Sharpe gross           : 0.55
+Sharpe liq (base)      : 0.50
+Sharpe liq (estress 2x): 0.46
+CAGR liq               : 2.88%
+MaxDD                  : -12.52%
+Skew (diario)          : -0.03   (esperado POSITIVO p/ trend)
+
+--- vs SPY buy&hold (mesmo periodo) ---
+SPY Sharpe=0.70  CAGR=12.63%  MaxDD=-45.62%
+TSMOM bate SPY no Sharpe (estress)? NAO
+
+--- DIVERSIFICACAO (a tese) ---
+Corr ao SPY (diaria)   : -0.174
+Corr ao SPY (mensal)   : -0.084
+Piores 10% meses do SPY (n=22):
+    SPY medio   = -7.80%/mes
+    TSMOM medio = 0.84%/mes  (positivo = crisis alpha)
+  2008_GFC    : TSMOM   +6.17%   SPY  -34.73%
+  2020_COVID  : TSMOM   -2.81%   SPY  -13.45%
+  2022_bear   : TSMOM  +12.59%   SPY  -17.74%
+
+--- vs 60/40 (SPY/TLT) — teste do CONJUNTO ---
+60/40 puro           : Sharpe=0.84 CAGR=9.50% MaxDD=-27.24% skew=0.13
+60/40 +20% TSMOM     : Sharpe=0.91 CAGR=8.31% MaxDD=-20.04% skew=0.04
+Sleeve TSMOM melhora o 60/40? Sharpe SIM  MaxDD SIM
+
+--- robustez por variante (Sharpe liq estressado) ---
+    1m        : -0.24
+    3m        : 0.30
+    6m        : 0.46
+    12m       : 0.29
+    3-6-12    : 0.38
+    1-3-6-12  : 0.28
+
+--- BARRA DE GRADUACAO ---
+DSR >= 0.95 ?            NAO (DSR=0.581)
+Sharpe liq estress>=0.5? NAO
+Bate SPY OU diversifica? SIM (bate_spy=False, diversifica=True)
+
+VEREDITO: REPROVADO
+==============================================================================

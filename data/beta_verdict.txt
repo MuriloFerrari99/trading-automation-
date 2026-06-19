@@ -1,0 +1,80 @@
+================================================================================================
+BETA DISCIPLINADO — carteira diversificada, gestao de risco, retorno ~de mercado com
+drawdown menor. Objetivo: track record limpo (rampa p/ AUM), NAO bater o mercado.
+================================================================================================
+BARRA HONESTA: VALE se a ESTRATEGIA entrega Calmar/MaxDD MATERIALMENTE melhor que o buy&hold (A)
+  com Sharpe >= o de A, liquido de custo. NAO se exige retorno maior — o objetivo e
+  risco-ajustado/drawdown melhor + track record. Se a estrategia so PIORA o retorno sem
+  melhorar o tombo, FALHA.
+
+PARAMS PADRAO (NAO otimizados, declarados): SMA200 (filtro tendencia) · vol-alvo 10% a.a. · lookback vol 60d · rebalance mensal ·
+  teto cripto 5%/nome · sem alavancagem (gross<=100%) · custo: equities 3bps/lado, cripto 35bps/lado.
+SEM LOOK-AHEAD: peso de t decidido com dado <= t-1 (.shift(1)); retorno em t; custo sobre |Δpeso|.
+
+PAINEL: 8 ativos, 1993-01-29..2026-06-15 (8401 dias de pregao).
+  SPY:1993-01-29→2026-06-15(8401)  QQQ:1999-03-10→2026-06-15(6859)  TLT:2002-07-30→2026-06-15(6008)  IEF:2002-07-30→2026-06-15(6008)  GLD:2004-11-18→2026-06-15(5426)  SLV:2006-04-28→2026-06-15(5064)  BTC-USD:2014-09-17→2026-06-15(2953)  ETH-USD:2017-11-09→2026-06-15(2159)
+JANELA-CABECA (tabelas 1,2,4) = a partir de 2004-11-18, 1o dia com equity+bond+metal vivos (cesta
+  GENUINAMENTE diversificada). ANTES disso, 'equal-weight' era ~100% acoes (SPY/QQQ) e
+  o tombo do benchmark A seria a bolha .com num book de acoes, NAO de cesta — comparar ali
+  inflaria a vantagem da estrategia. A tabela de CRISE (3) usa o historico INTEIRO p/ ver 2008.
+
+================================================================================================
+(1) ESTRATEGIA vs BENCHMARK A (equal-weight) vs BENCHMARK B (60/40)
+================================================================================================
+  estrategia                 |    CAGR | Sharpe | Sortino |   MaxDD | Calmar |       pior ano |  expo
+  ---------------------------------------------------------------------------------------------------
+  S: beta disciplinado       |   +5.6% |   0.77 |    0.99 |  -16.2% |   0.35 |   -10.3% (2022) |   73%
+  A: buy&hold eq-weight      |  +16.0% |   0.97 |    1.25 |  -38.8% |   0.41 |   -29.3% (2022) |  100%
+  B: 60/40 (SPY/IEF)         |   +8.4% |   0.80 |    1.00 |  -31.4% |   0.27 |   -16.7% (2008) |  100%
+
+================================================================================================
+(2) O PORTAO DE REGIME + VOL-TARGET REALMENTE MELHORA O DRAWDOWN SEM MATAR O RETORNO?
+    Decomposicao do overlay (mesma cesta; liga/desliga cada peca):
+================================================================================================
+  estrategia                 |    CAGR | Sharpe | Sortino |   MaxDD | Calmar |       pior ano |  expo
+  ---------------------------------------------------------------------------------------------------
+  eq-weight (sem overlay)=A  |  +16.0% |   0.97 |    1.25 |  -38.8% |   0.41 |   -29.3% (2022) |  100%
+  + so vol-target            |   +6.9% |   1.19 |    1.67 |  -13.5% |   0.51 |   -10.0% (2022) |   74%
+  + so portao regime/SMA     |   +7.8% |   0.73 |    0.92 |  -24.9% |   0.31 |   -18.1% (2022) |   95%
+  + ambos (=estrategia S)    |   +5.6% |   0.77 |    0.99 |  -16.2% |   0.35 |   -10.3% (2022) |   73%
+
+================================================================================================
+(3) COMPORTAMENTO EM CRISE (retorno acumulado na janela; '-' = fora do historico)
+================================================================================================
+  estrategia                 |     2008 (GFC) |   2020 (COVID) |    2022 (Bear)
+  -----------------------------------------------------------------------------
+  S: beta disciplinado       |          +7.2% |          +2.5% |         -10.3%
+  A: buy&hold eq-weight      |          -7.8% |          +5.5% |         -29.3%
+  B: 60/40                   |         -22.5% |          -1.7% |         -16.4%
+
+================================================================================================
+(4) SENSIBILIDADE (params PADRAO +/- variacoes; mostra que NAO e overfit)
+================================================================================================
+  (pulada — use sem --no-sensitivity)
+
+================================================================================================
+(5) VEREDITO
+================================================================================================
+  [FALHA] vs BENCHMARK A (buy&hold equal-weight, beta cru):
+    Sharpe: estrategia 0.77 vs A 0.97  (< barra)
+    MaxDD:  estrategia -16.2% vs A -38.8%  (reducao de 58% no tombo)
+    Calmar: estrategia 0.35 vs A 0.41  | CAGR: estrategia +5.6% vs A +16.0%
+    Pior ano: estrategia -10.3% (2022) vs A -29.3% (2022)
+
+  CONCLUSAO: a estrategia COMPLETA (S), como montada, NAO passa a barra honesta.
+  Sharpe 0.77 < 0.97 de A: empilhar TUDO custa retorno
+  sem comprar protecao proporcional. NAO vou vender o sonho.
+
+  O QUE FUNCIONA (decomposicao, mesma janela, vs A):
+    · VOL-TARGET sozinho: Sharpe 1.19 (vs A 0.97), MaxDD -13.5% (vs -38.8%), Calmar 0.51 (vs 0.41) -> PASSA a barra.
+    · PORTAO regime/SMA sozinho: Sharpe 0.73 (vs A 0.97), MaxDD -24.9% -> corta tombo, mas o whipsaw (vende no rompimento
+      da SMA200 e perde a volta) derruba o Sharpe; e o que arrasta S p/ baixo.
+
+  VEREDITO PRATICO: o lever que entrega o objetivo (retorno ~de mercado, tombo
+  menor, Sharpe melhor) e o VOL-TARGETING — nao o portao de regime nesta cesta
+  multi-ativo. O portao protege em bear sustentado (vide 2008/2022 na tabela 3),
+  mas na media de 2004-hoje cobra mais do que poupa. Recomendacao: rodar o beta
+  disciplinado com VOL-TARGET (e teto de cripto), e tratar o portao de regime como
+  hedge opcional/condicional (so em drawdown profundo), nao como overlay permanente.
+
+  vs BENCHMARK B (60/40): estrategia Sharpe 0.77/MaxDD -16.2% vs 60/40 Sharpe 0.80/MaxDD -31.4%.

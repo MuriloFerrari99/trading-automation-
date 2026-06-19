@@ -1,0 +1,81 @@
+====================================================================================================
+CARRY DELTA-NEUTRO EM CRIPTO (Binance USDS-M perp) — cash-and-carry / funding harvest
+====================================================================================================
+
+VEREDITO (criterio honesto, pre-registrado):
+  "ATRAENTE se: retorno liquido anualizado do carry delta-neutro >= buy-and-hold na regua
+   de risco (Sharpe liq >= 1.0 com alavancagem <= 2x) E sobrevive ao pior regime de funding
+   sem drawdown ruinoso. Senao, edge insuficiente para o risco operacional embutido."
+
+ESTRATEGIA: compra SPOT + vende PERP de mesmo notional (delta ~0). Coleta funding (shorts
+  recebem quando funding > 0). Variante so-short-perp (com risco direcional) mostrada p/ contraste.
+CUSTO: taker 4 bps/lado x 4 cruzamentos (spot+perp, entrada+saida) = 16 bps round-trip.
+Funding: 3 settlements/dia (00/08/16 UTC) -> 1095/ano. Universo: BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT.
+
+RESSALVA OBRIGATORIA: este backtest captura risco de PRECO/FUNDING/BASIS, mas NAO captura o
+  risco DOMINANTE real: CONTRAPARTE (falencia/hack de exchange), DE-PEG de stablecoin,
+  LIQUIDACAO por margem mal gerida no leg short. O veredito de retorno e NECESSARIO mas NAO
+  SUFICIENTE; a viabilidade real depende de gestao operacional/contraparte.
+
+----------------------------------------------------------------------------------------------------
+POR MOEDA (delta-neutro: funding + basis; bruto vs liquido):
+----------------------------------------------------------------------------------------------------
+     sym  setls fund_bps   %neg  piorMes | DNgross%   DNnet% Sharpe  MaxDD%   vol% | basisEnt basisSai
+------------------------------------------------------------------------------------------------------
+ BTCUSDT   1095    0.626  13.3%     12.3 |     6.97     7.04  12.09   -0.12   0.56 |      5.2     -5.7
+ ETHUSDT   1095    0.691  12.4%     14.8 |     7.69     7.82  14.50   -0.12   0.52 |      5.1     -6.2
+ SOLUSDT   1095    0.419  29.3%    -24.1 |     4.72     4.66   5.85   -0.79   0.78 |      4.9     -7.7
+ BNBUSDT   1095   -0.047  17.1%    -99.9 |    -0.44    -0.61  -0.44   -2.84   1.37 |      5.7     -1.4
+
+CONTRASTE — variante SO-SHORT-PERP (sem hedge spot; risco direcional CHEIO):
+     sym  SOgross%    SOnet%  Sharpe   MaxDD% | buy&hold:      BH%  BHsharpe  BHmaxDD%
+--------------------------------------------------------------------------------------
+ BTCUSDT    -45.60    -45.69   -1.00   -59.21 |              54.84      1.13    -28.10
+ ETHUSDT     -1.77     -1.93    0.32   -51.14 |             -32.89     -0.21    -63.20
+ SOLUSDT    -45.68    -45.77   -0.29   -66.38 |              -5.63      0.36    -59.77
+ BNBUSDT    -33.73    -33.84   -0.47   -50.51 |              10.77      0.43    -34.73
+
+====================================================================================================
+AGREGADO (carteira equal-weight das moedas validas):
+====================================================================================================
+  Carry DELTA-NEUTRO  | bruto_ann = +4.73%  liquido_ann = +4.73%
+                      | Sharpe_liq = 8.00  vol_ann = 0.81%  pior_MaxDD = -2.84%
+                      | % settlements com funding NEGATIVO (paga) = 18.0%
+  Buy-and-hold spot   | ann = +6.77%  Sharpe = 0.43  (a barra direcional a bater em ann)
+
+----------------------------------------------------------------------------------------------------
+ALAVANCAGEM — a que ponto o carry delta-neutro fica 'interessante' e o risco:
+----------------------------------------------------------------------------------------------------
+  Retorno 1x (sem alavancagem) liquido = 4.73%/ano.
+  Para igualar a barra de retorno alvo (10.0%/ano = buy&hold),
+  precisaria de ~2.1x de alavancagem no leg short.
+  -> ACIMA do teto de 2x (>2.1x): para ficar interessante exigiria
+     alavancagem que dispara o risco de LIQUIDACAO do short num spike de preco.
+  RISCO da alavancagem: cada x multiplica o funding MAS tambem aproxima o leg short
+  da liquidacao; um pico de preco + funding negativo simultaneo pode liquidar a margem
+  antes do funding compensar (o backtest NAO modela call de margem intraday).
+
+----------------------------------------------------------------------------------------------------
+STRESS — pior regime de funding e movimento de basis:
+----------------------------------------------------------------------------------------------------
+  BTCUSDT: pior mes de funding = 12.3 bps acumulados; 13.3% dos settlements pagaram; basis moveu 10.9 bps na janela.
+  ETHUSDT: pior mes de funding = 14.8 bps acumulados; 12.4% dos settlements pagaram; basis moveu 11.3 bps na janela.
+  SOLUSDT: pior mes de funding = -24.1 bps acumulados; 29.3% dos settlements pagaram; basis moveu 12.7 bps na janela.
+  BNBUSDT: pior mes de funding = -99.9 bps acumulados; 17.1% dos settlements pagaram; basis moveu 7.1 bps na janela.
+  Leitura: nos meses de funding negativo a estrategia PAGA; o hedge spot a protege da
+  direcao do preco, mas NAO do basis nem de funding negativo persistente (regime de baixa).
+
+====================================================================================================
+VEREDITO:
+====================================================================================================
+
+  ##############################################################################
+  #  EDGE INSUFICIENTE PARA O RISCO OPERACIONAL EMBUTIDO                       #
+  ##############################################################################
+  - so 'interessante' acima de 2.1x (> 2x -> risco de liquidacao)
+  - nao bate buy&hold em ann (4.73% < 6.77%)
+
+  Nota honesta: o carry delta-neutro a 1x e ESTRUTURALMENTE magro em bps/settlement;
+  so fica 'grande' com alavancagem, e e exatamente a alavancagem que traz o risco
+  de liquidacao + contraparte que NAO esta no backtest. Nao vendemos o sonho.
+

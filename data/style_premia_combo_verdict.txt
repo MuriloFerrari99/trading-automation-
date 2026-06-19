@@ -1,0 +1,81 @@
+==============================================================================
+TRIBUNAL — Style-premia COMBINADO (value+momentum+lowvol+carry, L/S)
+==============================================================================
+Universo: ['SPY', 'QQQ', 'IWM', 'EFA', 'EEM', 'VGK', 'EWJ', 'XLE', 'XLF', 'XLK', 'XLU', 'XLP', 'XLV', 'TLT', 'IEF', 'LQD', 'HYG', 'TIP', 'EMB', 'GLD', 'DBC', 'VNQ']
+Janela: 2002-07-30 -> 2026-06-17 (6010 dias, 288 meses)
+Custo: base 3 bps/lado | VEREDITO no estresse 6 bps/lado
+n_trials honesto (DSR): 60
+
+------------------------------------------------------------------------------
+ESTILOS ISOLADOS vs COMBO (custo estressado, todas as variantes do grid):
+------------------------------------------------------------------------------
+config                      Sharpe     CAGR    MaxDD  corrSPY
+lowvol.LO.tercil.v3           0.94     6.1%   -16.8%     0.57
+lowvol.LO.tercil.v6           0.92     6.0%   -17.7%     0.55
+combo.LO.tercil.v6            0.88     7.0%   -18.9%     0.56
+combo.LO.quartil.v3           0.87     6.8%   -16.1%     0.47
+lowvol.LO.quartil.v3          0.86     5.2%   -17.6%     0.41
+combo.LO.tercil.v12           0.84     6.7%   -18.8%     0.57
+combo.LO.tercil.v3            0.83     6.7%   -19.0%     0.58
+lowvol.LO.tercil.v12          0.82     5.3%   -17.6%     0.55
+mom.LO.tercil.v6              0.81    11.4%   -24.4%     0.74
+mom.LO.quartil.v6             0.80    11.6%   -23.5%     0.70
+combo.LO.quartil.v12          0.78     6.1%   -19.9%     0.46
+combo.LO.quartil.v6           0.78     6.1%   -18.5%     0.45
+lowvol.LO.quartil.v6          0.78     4.8%   -19.4%     0.40
+lowvol.LO.quartil.v12         0.76     4.6%   -18.5%     0.39
+carry.LO.tercil.v6            0.71     8.3%   -39.0%     0.80
+carry.LO.quartil.v6           0.70     8.1%   -36.6%     0.76
+value.LO.quartil.v6           0.65     8.2%   -24.2%     0.65
+value.LO.tercil.v6            0.62     7.6%   -23.4%     0.72
+mom.LS.quartil.v6             0.17     1.5%   -61.8%    -0.18
+mom.LS.tercil.v6              0.17     1.4%   -58.0%    -0.16
+value.LS.quartil.v6          -0.10    -3.5%   -70.2%    -0.48
+value.LS.tercil.v6           -0.13    -3.4%   -69.8%    -0.47
+carry.LS.tercil.v6           -0.23    -3.1%   -59.5%    -0.46
+carry.LS.quartil.v6          -0.26    -3.7%   -65.9%    -0.44
+combo.LS.tercil.v6           -0.30    -6.5%   -80.7%    -0.78
+combo.LS.quartil.v3          -0.31    -7.4%   -86.3%    -0.78
+combo.LS.tercil.v3           -0.32    -6.9%   -84.2%    -0.77
+combo.LS.tercil.v12          -0.32    -6.8%   -81.3%    -0.78
+combo.LS.quartil.v6          -0.36    -8.3%   -87.6%    -0.79
+lowvol.LS.tercil.v6          -0.38    -8.8%   -89.2%    -0.86
+combo.LS.quartil.v12         -0.38    -8.6%   -88.0%    -0.78
+lowvol.LS.tercil.v3          -0.39    -8.7%   -89.1%    -0.86
+lowvol.LS.tercil.v12         -0.39    -9.0%   -88.9%    -0.87
+lowvol.LS.quartil.v3         -0.40   -10.0%   -92.3%    -0.86
+lowvol.LS.quartil.v12        -0.43   -11.0%   -93.6%    -0.87
+lowvol.LS.quartil.v6         -0.45   -11.2%   -94.4%    -0.87
+
+MELHOR variante por estilo:
+  mom      -> mom.LO.tercil.v6         Sharpe=0.81 CAGR=11.4% corrSPY=0.74
+  lowvol   -> lowvol.LO.tercil.v3      Sharpe=0.94 CAGR=6.1% corrSPY=0.57
+  value    -> value.LO.quartil.v6      Sharpe=0.65 CAGR=8.2% corrSPY=0.65
+  carry    -> carry.LO.tercil.v6       Sharpe=0.71 CAGR=8.3% corrSPY=0.80
+  combo    -> combo.LO.tercil.v6       Sharpe=0.88 CAGR=7.0% corrSPY=0.56
+
+==============================================================================
+CANDIDATO A GRADUACAO (COMBO campeao): combo.LO.tercil.v6
+==============================================================================
+Sharpe_anual liq (estresse): 0.88
+CAGR liq: 7.0%   MaxDD: -18.9%
+corr ao SPY: 0.56
+
+SPY buy&hold (mesma janela): Sharpe=0.68 CAGR=11.5% MaxDD=-55.2%
+
+TRIBUNAL ESTATISTICO:
+  [FALHA] Sharpe_anual=0.88 (obstaculo data-snooping=1.31) | PSR=1.000 DSR=0.021 | n=5902 trials=60 skew=-0.62 kurt=12.56
+  PBO (CSCV, 36 configs): 0.004  (OK <0.5)
+  OOS split 70/30: IS Sharpe=0.95  OOS Sharpe=0.73
+
+------------------------------------------------------------------------------
+BARRA DE GRADUACAO:
+  DSR>=0.95 ............ False  (DSR=0.021)
+  Sharpe_liq>=0.8 ...... True  (0.88)
+  bate SPY ............. True  (0.88 vs 0.68)
+  OU diversifica ....... False  (corr=0.56)
+  robusto OOS .......... True  (OOS=0.73 vs IS=0.95)
+  PBO<0.5 .............. True  (0.004)
+
+  >>> VEREDITO: REPROVADO <<<
+==============================================================================

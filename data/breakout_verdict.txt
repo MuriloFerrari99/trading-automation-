@@ -1,0 +1,101 @@
+TRIBUNAL DO BREAKOUT (FimatheEngine) — a estrategia que o veredito original nunca testou.
+Fills gap-aware (open real em gap-through; empate=>stop). Custos reais. Carteira diaria.
+Barra: DSR>=0.95 E Sharpe_anual_liq>=0.8. n_trials honesto=12.
+
+============================================================================================
+CRIPTO · breakout · peso:dollar · gate:off · custo base
+============================================================================================
+  obs=1992 dias_ativos=38.3%  Sharpe_anual(liq)=  0.67  ret_diario_medio= 0.118%  vol_diaria= 3.34%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.940 |   0.940 | FALHA
+         12 |         0.72 |    0.940 |   0.455 | FALHA
+  PBO (selecao de simbolo, informativo): 0.60
+
+============================================================================================
+CRIPTO · breakout · peso:dollar · gate:trend_up · custo base
+============================================================================================
+  obs=1992 dias_ativos=35.7%  Sharpe_anual(liq)=  0.34  ret_diario_medio= 0.052%  vol_diaria= 2.92%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.785 |   0.785 | FALHA
+         12 |         0.72 |    0.785 |   0.191 | FALHA
+  PBO (selecao de simbolo, informativo): 0.39
+
+============================================================================================
+CRIPTO · breakout · peso:risk · gate:off · custo base
+============================================================================================
+  obs=1992 dias_ativos=38.3%  Sharpe_anual(liq)=  0.59  ret_diario_medio= 0.101%  vol_diaria= 3.24%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.914 |   0.914 | FALHA
+         12 |         0.72 |    0.914 |   0.381 | FALHA
+  PBO (selecao de simbolo, informativo): 0.44
+
+============================================================================================
+CRIPTO · breakout · peso:risk · gate:trend_up · custo base
+============================================================================================
+  obs=1992 dias_ativos=35.7%  Sharpe_anual(liq)=  0.28  ret_diario_medio= 0.041%  vol_diaria= 2.83%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.738 |   0.738 | FALHA
+         12 |         0.72 |    0.738 |   0.152 | FALHA
+  PBO (selecao de simbolo, informativo): 0.25
+
+============================================================================================
+EQUITIES · breakout · peso:dollar · gate:off · custo base
+============================================================================================
+  obs=1758 dias_ativos=92.9%  Sharpe_anual(liq)=  1.00  ret_diario_medio= 0.083%  vol_diaria= 1.32%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.996 |   0.996 | PASSA
+         12 |         0.64 |    0.996 |   0.832 | FALHA
+  PBO (selecao de simbolo, informativo): 0.56
+
+============================================================================================
+EQUITIES · breakout · peso:dollar · gate:trend_up · custo base
+============================================================================================
+  obs=1758 dias_ativos=87.8%  Sharpe_anual(liq)=  1.06  ret_diario_medio= 0.087%  vol_diaria= 1.30%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.997 |   0.997 | PASSA
+         12 |         0.63 |    0.997 |   0.868 | FALHA
+  PBO (selecao de simbolo, informativo): 0.44
+
+============================================================================================
+EQUITIES · breakout · peso:risk · gate:off · custo base
+============================================================================================
+  obs=1758 dias_ativos=92.9%  Sharpe_anual(liq)=  0.91  ret_diario_medio= 0.069%  vol_diaria= 1.19%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.992 |   0.992 | PASSA
+         12 |         0.64 |    0.992 |   0.765 | FALHA
+  PBO (selecao de simbolo, informativo): 0.38
+
+============================================================================================
+EQUITIES · breakout · peso:risk · gate:trend_up · custo base
+============================================================================================
+  obs=1758 dias_ativos=87.8%  Sharpe_anual(liq)=  0.97  ret_diario_medio= 0.072%  vol_diaria= 1.17%
+  ----------------------------------------------------------------------------------------
+   n_trials | obstaculo_SR |  PSR(>0) |     DSR | veredito
+          1 |         0.00 |    0.995 |   0.995 | PASSA
+         12 |         0.64 |    0.995 |   0.811 | FALHA
+  PBO (selecao de simbolo, informativo): 0.37
+
+==============================================================================
+TESTE DE ALPHA vs BETA (a verificacao que decide tudo) — janela 2019-2025
+==============================================================================
+                              Sharpe    CAGR     MaxDD   expo
+  Breakout acoes (EW)          1.00    20.6%   -45.6%    93%
+  Cesta EW long-only (passiva) 1.14    23.9%   -31.0%   100%
+  SPY buy&hold                 0.87       -        -      -
+  SPY timing trend_up          0.91       -        -      -
+
+VEREDITO: o Sharpe ~1.0 do breakout e BETA de bull market, NAO alpha. Ele
+perde para a cesta passiva em Sharpe, CAGR E drawdown. O PF 1.8 por-trade era
+miragem: media beta de mercado 2019-2025 + ausencia de benchmark. Cripto
+breakout e fraco (Sharpe 0.28-0.67). Nenhuma estrategia long-only atual bate
+o indice equal-weight.
+
+IMPLICACAO METODOLOGICA: o tribunal compara Sharpe contra 0 (PSR sr_benchmark=0)
+-> trivial num bull. A barra correta e bater a cesta buy&hold (alpha), nao zero.

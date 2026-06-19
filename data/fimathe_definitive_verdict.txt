@@ -1,0 +1,91 @@
+====================================================================================================
+TESTE DEFINITIVO DA FIMATHE INTRADAY — o Sharpe 1.50 do ouro e REAL ou ARTEFATO?
+====================================================================================================
+
+REGUA = RISCO-AJUSTADO (Sharpe), nao retorno bruto. RESSUSCITA so se:
+  DSR>=0.95 no historico LONGO  E  Sharpe_liq robusto na ANCORA REAL (~22h, nao so 00 UTC)
+  E  estavel OUT-OF-SAMPLE por sub-periodo. Senao -> FALHA DEFINITIVA.
+Custo = SO spread (intraday, sem swap); fills gap-aware; serie = retorno por sessao.
+Motor: fimathe/canal_abertura.py (reuso). Harness: simulation/fimathe_intraday.py (reuso).
+
+----------------------------------------------------------------------------------------------------
+PILAR 1 — PROFUNDIDADE DE DADOS (mais anos apertam o DSR)
+----------------------------------------------------------------------------------------------------
+  XAUUSD M15 (Dukascopy, BID): 549,616 barras  2004-01-01..2026-06-15  (~22.5 anos)
+  vs tribunal anterior: ~3.0 anos (2023-2026).  Ganho: ~7.5x mais historico.
+  spread modelado: 0.02500 (~2.5 pip)
+
+  BUY&HOLD do ouro (historico longo): Sharpe_anual=0.62  ret_total=+939%
+
+----------------------------------------------------------------------------------------------------
+PILAR 2 — SHARPE vs ANCORA DE SESSAO (o teste-chave da fragilidade)
+----------------------------------------------------------------------------------------------------
+  Se o Sharpe so existe na ancora 00 UTC (arbitraria) e some na ABERTURA REAL
+  (~22h), o '1.50' era artefato da ancora. Se sobrevive em todas, e sinal.
+
+            ancora | take |   #tr tr/dia |  win% |   liq/tr |  Sh_liq |    DSR |   liq_tot    alpha
+  ----------------------------------------------------------------------------------------------
+            22 UTC |   t1 |  5990   0.91 | 67.1% |  -0.004% |   -0.18 |  0.001 |      -25%    -964%
+            22 UTC |   t2 |  5990   0.91 | 53.2% |  -0.010% |   -0.30 |  0.000 |      -47%    -987%
+            21 UTC |   t1 |  5987   0.88 | 63.8% |  -0.013% |   -0.62 |  0.000 |      -56%    -995%
+            21 UTC |   t2 |  5987   0.88 | 51.2% |  -0.021% |   -0.71 |  0.000 |      -73%   -1013%
+            23 UTC |   t1 |  6087   0.87 | 67.5% |  -0.007% |   -0.27 |  0.000 |      -36%    -975%
+            23 UTC |   t2 |  6087   0.87 | 54.3% |  -0.015% |   -0.44 |  0.000 |      -62%   -1002%
+  00 UTC (control) |   t1 |  6333   0.87 | 66.1% |  +0.000% |    0.01 |  0.018 |       -3%    -942%
+  00 UTC (control) |   t2 |  6333   0.87 | 54.4% |  +0.002% |    0.06 |  0.033 |       +4%    -935%
+
+  MELHOR trial: ancora=00 UTC (control) take2  ->  Sharpe_liq=0.06  DSR=0.033
+  ANCORA REAL (~22h) take2 -> Sharpe_liq=-0.30  DSR=0.000   |   CONTROL (00 UTC) take2 -> Sharpe_liq=0.06  DSR=0.033
+  Dispersao do Sharpe entre ancoras (take2): [-0.71 .. 0.06]  (amplitude 0.77).  Amplitude grande => o numero depende da ancora.
+
+----------------------------------------------------------------------------------------------------
+PILAR 3 — WALK-FORWARD OOS (o Sharpe/DSR se sustenta fora da amostra?)
+----------------------------------------------------------------------------------------------------
+  Divide o historico em sub-periodos contiguos e mede a MELHOR config
+  (ancora=00 UTC (control) take2) em cada um. Sinal estavel?
+
+              sub-periodo |   #tr |  win% |   liq/tr |  Sh_liq |    DSR |   liq_tot |  BH_Sh   BH_tot
+  --------------------------------------------------------------------------------------------
+   2004-01-01..2008-06-28 |  1313 | 51.5% |  +0.009% |    0.20 |  0.685 |       +9% |   0.89    +124%
+   2008-06-29..2012-12-24 |  1397 | 53.0% |  -0.013% |   -0.33 |  0.205 |      -18% |   0.60     +79%
+   2012-12-24..2017-06-22 |  1209 | 55.4% |  -0.006% |   -0.21 |  0.309 |       -8% |  -0.28     -24%
+   2017-06-22..2021-12-17 |  1211 | 55.2% |  -0.004% |   -0.15 |  0.364 |       -5% |   0.58     +44%
+   2021-12-19..2026-06-15 |  1204 | 57.6% |  +0.027% |    0.69 |  0.946 |      +36% |   1.02    +139%
+
+  OOS: Sharpe positivo em 2/5 sub-periodos;  bate B&H em 1/5;  Sharpe medio=0.04  desvio=0.41  min=-0.33
+
+====================================================================================================
+VEREDITO DEFINITIVO
+====================================================================================================
+  n_trials honesto = 4 ancoras x 2 takes = 8  (sobre ~22 anos de XAUUSD M15)
+
+  Criterios de RESSURREICAO (regua = risco-ajustado):
+    [X ] DSR>=0.95 no historico longo (melhor trial): DSR=0.033
+    [X ] Sharpe robusto na ANCORA REAL (~22h, nao so 00 UTC): 22h take2 Sh=-0.30 vs melhor 0.06; min entre ancoras=-0.71
+    [X ] Estavel OUT-OF-SAMPLE: Sharpe>0 em 2/5 sub-periodos, sem troca de sinal
+    [info] Sharpe_liq > buy&hold do ouro (0.62): NAO (melhor Sh=0.06)
+
+  ##########################################################################################
+  ##                                                                                      ##
+  ##                           F A L H A   D E F I N I T I V A                            ##
+  ##                                                                                      ##
+  ##                          A FIMATHE intraday NAO ressuscita.                          ##
+  ##                                                                                      ##
+  ##########################################################################################
+
+  Pilar(es) que reprovaram: DSR=0.033<0.95 (indistinguivel de sorte mesmo em ~22 anos); FRAGIL a ancora (22h Sh=-0.30 vs best 0.06; min entre ancoras=-0.71); instavel OOS (Sharpe>0 so em 2/5 sub-periodos).
+
+  RESPOSTA: o Sharpe ~1.50 era ARTEFATO. Com mais dados o DSR nao sobe a 0.95
+  e na ANCORA REAL (~22h) o Sharpe cai vs o control 00 UTC — confirma a
+  fragilidade que o Coder apontou: o '1.50' dependia da ancora arbitraria.
+
+  NOTA: 'risco-ajustado > B&H' so importa se for ROBUSTO (DSR + ancora + OOS).
+  Um Sharpe alto que depende da ancora ou do periodo nao e alavancavel com
+  seguranca — alavancar ruido amplifica a ruina, nao o retorno.
+
+  MARCA: este veredito NAO autoriza capital real. Requer AUDITORIA INDEPENDENTE
+  do Coder (fills, look-ahead, custo, ancora) e confirmacao em M1 antes de tudo.
+
+  Arquivos: simulation/fimathe_definitive.py  |  data/fimathe_definitive_verdict.txt
+            cache profundo: data/fimathe_intraday_cache/XAUUSD_M15_deep.csv
+====================================================================================================

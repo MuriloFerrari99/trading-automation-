@@ -1,0 +1,321 @@
+================================================================================================
+BETA FRONTIER — fronteira risco/retorno do beta p/ ESCOLHA CONSCIENTE de orcamento de DD.
+O usuario quer MAIS retorno ACEITANDO mais MaxDD. Mostra o que cada nivel de DD COMPRA de
+retorno/Sharpe, onde fica a Kelly (e por que ela e in-investivel), e a faixa SA recomendada.
+================================================================================================
+
+PREMISSAS / HONESTIDADE (reusa simulation.beta_portfolio + simulation.beta_v2, NAO editados):
+  NUCLEO: vol-target PURO (peso ~1/vol por ativo, teto de cripto, SEM portao de regime —
+  o portao reprovou por whipsaw no modulo auditado) · lookback vol 60d · rebalance mensal.
+  EIXOS: vol-alvo {10%, 12%, 15%, 20%} x alavancagem {1.00, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00}.
+  FINANCIAMENTO REAL: 5.5% a.a. (~rf medio + spread de margem) cobrado DIARIAMENTE
+  so sobre o capital emprestado max(gross-1,0). Custo de transacao: equities 3bps/lado, cripto 35bps/lado.
+  SEM LOOK-AHEAD: peso de t decidido com dado <= t-1 (.shift(1) herdado). Metricas na JANELA-CABECA
+  (cesta diversificada, a partir de 2004-11-18); crises no historico INTEIRO (p/ ver 2008).
+  DD AO-VIVO ESTIMADO = max(1.4x o DD do backtest, pior crise observada). Backtest = MELHOR-CASO.
+
+  PAINEL: 8 ativos, 1993-01-29..2026-06-15 (8401 dias).  SPY:1993-01-29→2026-06-15  QQQ:1999-03-10→2026-06-15  TLT:2002-07-30→2026-06-15  IEF:2002-07-30→2026-06-15  GLD:2004-11-18→2026-06-15  SLV:2006-04-28→2026-06-15  BTC-USD:2014-09-17→2026-06-15  ETH-USD:2017-11-09→2026-06-15
+
+================================================================================================
+(0) *** TABELA-CARDAPIO ***  'O DD que voce aguenta -> o CAGR / Sharpe que vem junto'
+    Ordenada por DD do backtest crescente. ESCOLHA UMA LINHA conscientemente.
+================================================================================================
+  DD backtest | DD ao-vivo est. (mid/pior) |    CAGR | Sharpe | Calmar |  config (vol-alvo x lev)
+  -----------------------------------------------------------------------------------------------
+       -13.5% |      -18.9% /      -20.2%  |   +6.9% |   1.19 |   0.51 |   vol 10% x 1.00x
+       -16.0% |      -22.4% /      -24.0%  |   +8.1% |   1.20 |   0.51 |   vol 12% x 1.00x
+       -16.6% |      -23.3% /      -24.9%  |   +8.3% |   1.14 |   0.50 |   vol 10% x 1.25x
+       -19.5% |      -27.3% /      -29.2%  |   +9.1% |   1.18 |   0.47 |   vol 15% x 1.00x
+       -19.7% |      -27.6% /      -29.5%  |   +9.4% |   1.12 |   0.48 |   vol 12% x 1.25x
+       -19.7% |      -27.6% /      -29.5%  |   +9.4% |   1.08 |   0.47 |   vol 10% x 1.50x
+       -22.8% |      -31.9% /      -34.2%  |  +10.2% |   1.01 |   0.45 |   vol 10% x 1.75x
+       -23.4% |      -32.8% /      -35.1%  |  +10.4% |   1.04 |   0.44 |   vol 12% x 1.50x
+       -24.0% |      -33.7% /      -36.1%  |   +9.5% |   1.15 |   0.40 |   vol 20% x 1.00x
+       -24.1% |      -33.7% /      -36.1%  |  +10.2% |   1.07 |   0.42 |   vol 15% x 1.25x
+       -25.9% |      -36.2% /      -38.8%  |  +10.9% |   0.95 |   0.42 |   vol 10% x 2.00x
+       -27.1% |      -37.9% /      -40.6%  |  +11.3% |   0.97 |   0.42 |   vol 12% x 1.75x
+       -28.6% |      -40.0% /      -42.9%  |  +11.2% |   0.99 |   0.39 |   vol 15% x 1.50x
+       -29.8% |      -41.8% /      -44.7%  |  +10.6% |   1.03 |   0.35 |   vol 20% x 1.25x
+       -30.7% |      -43.0% /      -46.1%  |  +12.1% |   0.92 |   0.39 |   vol 12% x 2.00x
+       -32.0% |      -44.7% /      -47.9%  |  +12.2% |   0.87 |   0.38 |   vol 10% x 2.50x
+       -33.1% |      -46.4% /      -49.7%  |  +12.1% |   0.92 |   0.36 |   vol 15% x 1.75x
+       -35.5% |      -49.6% /      -53.2%  |  +11.5% |   0.94 |   0.32 |   vol 20% x 1.50x
+       -37.5% |      -52.5% /      -56.2%  |  +12.9% |   0.87 |   0.34 |   vol 15% x 2.00x
+       -37.8% |      -53.0% /      -56.7%  |  +13.3% |   0.81 |   0.35 |   vol 10% x 3.00x
+       -37.8% |      -53.0% /      -56.7%  |  +13.5% |   0.84 |   0.36 |   vol 12% x 2.50x
+       -40.7% |      -57.0% /      -61.0%  |  +12.4% |   0.88 |   0.30 |   vol 20% x 1.75x
+       -44.3% |      -62.0% /      -66.4%  |  +14.8% |   0.79 |   0.33 |   vol 12% x 3.00x
+       -45.4% |      -63.6% /      -68.1%  |  +14.4% |   0.80 |   0.32 |   vol 15% x 2.50x
+       -45.6% |      -63.8% /      -68.3%  |  +13.2% |   0.84 |   0.29 |   vol 20% x 2.00x
+       -52.5% |      -73.4% /      -78.7%  |  +15.8% |   0.76 |   0.30 |   vol 15% x 3.00x
+       -54.2% |      -75.9% /      -81.4%  |  +14.8% |   0.77 |   0.27 |   vol 20% x 2.50x
+       -61.7% |      -86.4% /      -92.5%  |  +16.1% |   0.73 |   0.26 |   vol 20% x 3.00x
+  -----------------------------------------------------------------------------------------------
+       -38.8% |      -54.3% /      -58.2%  |  +16.0% |   0.97 |   0.41 | BETA CRU (buy&hold)
+
+  COMO LER: escolha a coluna 'DD backtest' que voce aguenta. O 'DD ao-vivo estimado' (mid = 1.4x o
+  backtest OU a pior crise, o que for pior; pior = 1.5x / colchao de crise) e o que voce PROVAVELMENTE
+  vai sofrer de verdade — PLANEJE por ele, nao pelo backtest. A direita esta a config que produz a linha.
+
+================================================================================================
+VEREDITO — A PARTE HONESTA DO QUANT
+================================================================================================
+(1) ALAVANCAGEM OTIMA DE KELLY (o L que MAXIMIZA o CAGR — achada em grade fina ate 12x):
+  vol-alvo | Kelly L (real) | CAGR no pico | MaxDD backtest | MaxDD ao-vivo est. | Sharpe
+  ---------------------------------------------------------------------------------------
+       10% |         8.50x |       +19.3% |         -78.5% |            -109.9% |   0.61
+       12% |         7.75x |       +20.8% |         -81.8% |            -114.5% |   0.63
+       15% |         6.75x |       +20.7% |         -84.4% |            -118.1% |   0.63
+       20% |         6.00x |       +20.1% |         -87.8% |            -123.0% |   0.62
+  (>= = o CAGR ainda subia no teto da busca de 12x; a Kelly real fica AINDA mais longe — so reforca
+   que e in-investivel. 'ao-vivo est.' = 1.4x o DD do backtest.)
+
+    O QUE ISTO SIGNIFICA (teoria): para cada vol-alvo existe um L de Kelly que MAXIMIZA o
+    retorno geometrico (CAGR). ATE ele, mais alavancagem compra mais retorno; PASSOU dele,
+    mais L = MENOS CAGR (vol-drag: a vol entra ao quadrado e corta a media geometrica) E
+    MAIS DD — voce paga risco + financiamento p/ DESTRUIR valor.
+
+    *** A DESCOBERTA HONESTA, E A MAIS IMPORTANTE DESTE RELATORIO ***
+    A Kelly REAL desta carteira fica em L ~8.5x (vol-alvo 10%) — e nela o MaxDD do
+    BACKTEST ja e -78.5% (≈ -109.9% AO VIVO). Isso e FINANCEIRAMENTE
+    IN-INVESTIVEL: um DD de -65% a -90% quebra o investidor (e o alocador foge muito antes).
+    CONCLUSAO PRATICA: a Kelly NAO e a sua restricao — o seu ORCAMENTO DE DRAWDOWN e. Voce
+    vai bater no teto de DD que aguenta MUITO antes de chegar perto da Kelly. Na pratica,
+    TODA a faixa investivel (L=1x..~3x) esta ABAIXO da Kelly — ou seja, voce esta sempre
+    'ao longo da fronteira' (sub-Kelly), nunca no regime de vol-drag. O perigo do pos-otimo
+    e teorico aqui; o perigo REAL e escolher um L cujo DD AO-VIVO te quebra na proxima crise.
+
+(2) 'AO LONGO DA FRONTEIRA' (sub-Kelly) — o que mais DD COMPRA, e o que VAZA (vol-alvo 10%):
+    L=1.0x: CAGR +6.9% · Sharpe 1.19 · MaxDD -13.5%
+    L=2.0x: CAGR +10.9% · Sharpe 0.95 · MaxDD -25.9%
+    L=3.0x: CAGR +13.3% · Sharpe 0.81 · MaxDD -37.8%
+    De 1x a 3x: o CAGR sobe ~6 p.p. mas o DD sobe ~24 p.p. — e o SHARPE CAI de
+    1.19 p/ 0.81. ENTAO: alavancar NAO e 'de graca' (Sharpe constante). O
+    financiamento (5.5% a.a. sobre o emprestado) + a vol crescente cobram um pedaco do retorno.
+    Voce compra retorno absoluto MAIOR, mas retorno RISCO-AJUSTADO PIOR a cada degrau de L.
+    Isto e 'ao longo da fronteira' com vazamento — honesto: +DD compra +CAGR, mas nao 1:1.
+
+    'PASSOU DO OTIMO' (so p/ registro — voce NAO deve chegar la): alem da Kelly (~6-8x, DD
+    -65%/-90%) o CAGR PARA de subir e CAI, o Sharpe vira ~0.6 e o DD vai a -80%+. E destruicao
+    pura de valor. A grade-cardapio para em 3x exatamente p/ nao induzir ninguem a essa zona.
+
+(3) O DD DO BACKTEST E MELHOR-CASO — O AO-VIVO SERA PIOR:
+    O backtest assume execucao perfeita, sem gaps, params sempre otimos. AO VIVO o DD
+    tipicamente EXCEDE o do backtest em ~1.3-1.5x (slippage de cauda, gaps de abertura,
+    execucao imperfeita, regime que muda, alavancagem que amplifica o erro). A coluna 'DD
+    ao-vivo estimado' do cardapio ja faz a conta: max(1.4x o backtest, pior crise observada).
+    Exemplo: vol 10% x 2.0x tem DD backtest -25.9% -> planeje p/ -36.2% a -38.8% AO VIVO.
+    REGRA DE OURO: dimensione o orcamento de risco pelo DD AO-VIVO, NUNCA pelo backtest. Se
+    voce so aguenta -25% de verdade, escolha uma linha cujo DD AO-VIVO <= -25% (DD backtest ~-18%).
+
+(4) EFEITO DAS VARIANTES DE MIX (no ponto vol-alvo 10%, L=2.0x):
+    · cripto 5%/nome  (base)     : CAGR +10.9% · Sharpe 0.95 · MaxDD -25.9%
+    · cripto 10%/nome (+risco)   : CAGR +11.0% · Sharpe 0.96 · MaxDD -25.9%
+    · cripto 2%/nome  (tilt def.) : CAGR +10.5% · Sharpe 0.92 · MaxDD -25.6%
+    LEITURA: mais cripto move pouco a media (teto de 5%->10% por nome) mas engrossa a cauda;
+    o tilt defensivo (2%) suaviza de leve. E uma 2a alavanca de risco, mas CONCENTRADA num
+    ativo so — pior diversificada que o L. Prefira ajustar o RISCO pelo L (cesta inteira),
+    nao empilhando cripto. Cripto e tempero, nao o motor.
+
+(5) RECOMENDACAO DE FAIXA SA + TENSAO AUM:
+    FAIXA SA (vol-alvo 10%): de L=1.0x ate ~L=1.50x. Teto definido NAO pela Kelly
+    (longe demais), mas pelo DD AO-VIVO ainda 'vendavel': ~-27.6% no topo da faixa.
+    No topo sao da faixa (L~1.50x): CAGR +9.4%, Sharpe 1.08, MaxDD backtest -19.7%.
+    Cada degrau ATE aqui compra retorno de forma aceitavel (Sharpe cai mas continua > ~0.95).
+
+    AVISO FORTE — ZONA QUE EU NAO RECOMENDO (acima do topo sao, ainda sub-Kelly):
+    L > ~2x leva o DD AO-VIVO p/ alem de -35/40%. Voce ainda esta sub-Kelly (o CAGR ainda sobe),
+    mas (i) o Sharpe ja caiu p/ ~0.8-0.9 e (ii) o DD ao-vivo entra na zona que QUEBRA conta e
+    AFASTA alocador. Tecnicamente nao e 'pos-otimo' de Kelly, mas e 'pos-otimo' de SOBREVIVENCIA.
+    E NUNCA, em nenhuma hipotese, opere perto da Kelly (~6-8x): la o DD ao-vivo passa de -90%.
+
+    TENSAO AUM (honesta, com a sua meta de captar): alocador institucional corta alocacao
+    mental perto de -20% de DD e te demite em -30/35%. Um track com DD ao-vivo > ~-30% AFASTA
+    dinheiro mesmo com CAGR maior — o retorno extra pode CUSTAR o AUM que voce quer levantar.
+    Trade-off cru: +retorno (L mais alto) <-> +facilidade de captar (L mais baixo, DD contido).
+    Se o objetivo e a RAMPA DE AUM, o L baixo (1.0-1.5x) vende melhor que o CAGR de um L=3x.
+
+    MINHA RECOMENDACAO (o Executor, sem vender sonho):
+    · Quer rampa de AUM / track limpo: vol 10% x L=1.0-1.25x (DD ao-vivo ~-19/-23%, Sharpe ~1.15).
+    · Aceita mais DD por mais retorno, consciente: vol 10% x L=1.5-2.0x (DD ao-vivo ~-28/-36%,
+      CAGR +9/+11%, Sharpe ~1.0-1.1). Esse e o topo do que eu chamaria de 'sao'.
+    · NAO recomendo passar de L~2.0-2.5x: o DD ao-vivo (>-40%) cobra caro e nao paga em Sharpe.
+
+    SE VOCE ESCOLHER UM PONTO NOVO: o Coder AUDITA a config (sizing, cap de cripto, taxa de
+    financiamento, limites de margem, ruina) ANTES do go-live. Isto aqui e ANALISE — a config
+    de PRODUCAO NAO foi alterada.
+
+  *** Numeros reais, sem look-ahead, custo de transacao + financiamento incluidos. ***
+  *** DD do backtest e MELHOR-CASO; dimensione SEMPRE pelo DD AO-VIVO estimado. ***
+
+================================================================================================
+(1) FRONTEIRA COMPLETA — DOIS EIXOS (vol-alvo x alavancagem). '<- maior CAGR da grade' = topo
+    da grade (3x), NAO a Kelly real (que fica em ~6-8x, DD catastrofico — ver veredito).
+    Variante de mix: cripto 5%/nome (base de producao).
+================================================================================================
+  vol-alvo   lev expo-alvo gross med |    CAGR Sharpe Sortino | MaxDD(bt) Calmar        pior ano    maior DD |
+  ------------------------------------------------------------------------------------------------------------
+       10% 1.00x       10%       74% |   +6.9%   1.19    1.67 |    -13.5%   0.51   -10.0% (2022) 565d (~27m) |
+       10% 1.25x       12%       93% |   +8.3%   1.14    1.60 |    -16.6%   0.50   -12.4% (2022) 566d (~27m) |
+       10% 1.50x       15%      112% |   +9.4%   1.08    1.51 |    -19.7%   0.47   -14.7% (2022) 566d (~27m) |
+       10% 1.75x       18%      130% |  +10.2%   1.01    1.42 |    -22.8%   0.45   -17.1% (2022) 574d (~27m) |
+       10% 2.00x       20%      149% |  +10.9%   0.95    1.34 |    -25.9%   0.42   -19.5% (2022) 577d (~27m) |
+       10% 2.50x       25%      186% |  +12.2%   0.87    1.22 |    -32.0%   0.38   -24.5% (2022) 886d (~42m) |
+       10% 3.00x       30%      223% |  +13.3%   0.81    1.13 |    -37.8%   0.35   -29.7% (2022) 920d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       12% 1.00x       12%       84% |   +8.1%   1.20    1.69 |    -16.0%   0.51   -11.9% (2022) 566d (~27m) |
+       12% 1.25x       15%      105% |   +9.4%   1.12    1.58 |    -19.7%   0.48   -14.7% (2022) 566d (~27m) |
+       12% 1.50x       18%      126% |  +10.4%   1.04    1.46 |    -23.4%   0.44   -17.6% (2022) 574d (~27m) |
+       12% 1.75x       21%      147% |  +11.3%   0.97    1.37 |    -27.1%   0.42   -20.5% (2022) 577d (~27m) |
+       12% 2.00x       24%      169% |  +12.1%   0.92    1.29 |    -30.7%   0.39   -23.5% (2022) 579d (~28m) |
+       12% 2.50x       30%      211% |  +13.5%   0.84    1.18 |    -37.8%   0.36   -29.7% (2022) 920d (~44m) |
+       12% 3.00x       36%      253% |  +14.8%   0.79    1.11 |    -44.3%   0.33   -35.5% (2022) 923d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       15% 1.00x       15%       93% |   +9.1%   1.18    1.64 |    -19.5%   0.47   -14.7% (2022) 566d (~27m) |
+       15% 1.25x       19%      117% |  +10.2%   1.07    1.48 |    -24.1%   0.42   -18.3% (2022) 575d (~27m) |
+       15% 1.50x       22%      140% |  +11.2%   0.99    1.37 |    -28.6%   0.39   -21.9% (2022) 578d (~28m) |
+       15% 1.75x       26%      163% |  +12.1%   0.92    1.28 |    -33.1%   0.36   -25.8% (2022) 580d (~28m) |
+       15% 2.00x       30%      186% |  +12.9%   0.87    1.21 |    -37.5%   0.34   -29.7% (2022) 582d (~28m) |
+       15% 2.50x       38%      233% |  +14.4%   0.80    1.12 |    -45.4%   0.32   -36.9% (2022) 604d (~29m) |
+       15% 3.00x       45%      280% |  +15.8%   0.76    1.05 |    -52.5%   0.30   -43.5% (2022) 923d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       20% 1.00x       20%       98% |   +9.5%   1.15    1.59 |    -24.0%   0.40   -18.5% (2022) 569d (~27m) |
+       20% 1.25x       25%      122% |  +10.6%   1.03    1.42 |    -29.8%   0.35   -23.3% (2022) 579d (~28m) |
+       20% 1.50x       30%      147% |  +11.5%   0.94    1.31 |    -35.5%   0.32   -28.2% (2022) 580d (~28m) |
+       20% 1.75x       35%      171% |  +12.4%   0.88    1.22 |    -40.7%   0.30   -33.0% (2022) 587d (~28m) |
+       20% 2.00x       40%      196% |  +13.2%   0.84    1.16 |    -45.6%   0.29   -37.5% (2022) 605d (~29m) |
+       20% 2.50x       50%      245% |  +14.8%   0.77    1.07 |    -54.2%   0.27   -45.8% (2022) 635d (~30m) |
+       20% 3.00x       60%      293% |  +16.1%   0.73    1.01 |    -61.7%   0.26   -53.2% (2022) 923d (~44m) |  <- maior CAGR da grade
+  ············································································································
+  REFERENCIA beta cru (buy&hold eq-weight): CAGR +16.0% · Sharpe 0.97 · MaxDD -38.8% · Calmar 0.41.
+  expo-alvo = vol-alvo x lev (vol 'tomada' mirada). gross med = exposicao REAL media carregada (menor: o vol-target deixa caixa).
+  NOTA: 'maior CAGR da grade' (3x) NAO e a Kelly — o CAGR ainda sobe alem de 3x; a Kelly real fica
+  em L muito maior, com DD catastrofico (ver veredito). A grade para em 3x porque alem disso o DD ja e in-investivel.
+
+================================================================================================
+(2a) VARIANTE: cripto 10%/nome (+ risco/retorno de cauda)
+================================================================================================
+  vol-alvo   lev expo-alvo gross med |    CAGR Sharpe Sortino | MaxDD(bt) Calmar        pior ano    maior DD |
+  ------------------------------------------------------------------------------------------------------------
+       10% 1.00x       10%       74% |   +7.0%   1.19    1.68 |    -13.5%   0.52   -10.0% (2022) 535d (~25m) |
+       10% 1.25x       12%       93% |   +8.3%   1.14    1.61 |    -16.6%   0.50   -12.5% (2022) 565d (~27m) |
+       10% 1.50x       15%      112% |   +9.4%   1.08    1.52 |    -19.7%   0.48   -14.8% (2022) 566d (~27m) |
+       10% 1.75x       18%      130% |  +10.2%   1.01    1.42 |    -22.8%   0.45   -17.2% (2022) 573d (~27m) |
+       10% 2.00x       20%      149% |  +11.0%   0.96    1.34 |    -25.9%   0.42   -19.7% (2022) 577d (~27m) |
+       10% 2.50x       25%      186% |  +12.3%   0.87    1.22 |    -32.0%   0.38   -24.7% (2022) 888d (~42m) |
+       10% 3.00x       30%      223% |  +13.4%   0.81    1.14 |    -37.8%   0.35   -29.9% (2022) 920d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       12% 1.00x       12%       84% |   +8.1%   1.20    1.69 |    -16.0%   0.51   -12.0% (2022) 565d (~27m) |
+       12% 1.25x       15%      105% |   +9.5%   1.13    1.58 |    -19.7%   0.48   -14.8% (2022) 566d (~27m) |
+       12% 1.50x       18%      126% |  +10.5%   1.05    1.47 |    -23.4%   0.45   -17.7% (2022) 574d (~27m) |
+       12% 1.75x       21%      147% |  +11.4%   0.98    1.38 |    -27.1%   0.42   -20.7% (2022) 577d (~27m) |
+       12% 2.00x       24%      168% |  +12.2%   0.93    1.30 |    -30.7%   0.40   -23.7% (2022) 579d (~28m) |
+       12% 2.50x       30%      211% |  +13.6%   0.85    1.19 |    -37.8%   0.36   -29.9% (2022) 919d (~44m) |
+       12% 3.00x       36%      253% |  +14.9%   0.80    1.12 |    -44.3%   0.34   -35.7% (2022) 923d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       15% 1.00x       15%       93% |   +9.1%   1.18    1.64 |    -19.5%   0.47   -14.8% (2022) 565d (~27m) |
+       15% 1.25x       19%      117% |  +10.3%   1.07    1.49 |    -24.1%   0.43   -18.5% (2022) 574d (~27m) |
+       15% 1.50x       22%      140% |  +11.3%   0.99    1.38 |    -28.6%   0.39   -22.1% (2022) 578d (~28m) |
+       15% 1.75x       26%      163% |  +12.2%   0.93    1.29 |    -33.1%   0.37   -26.0% (2022) 579d (~28m) |
+       15% 2.00x       30%      186% |  +13.0%   0.88    1.22 |    -37.5%   0.35   -29.9% (2022) 582d (~28m) |
+       15% 2.50x       38%      233% |  +14.6%   0.81    1.12 |    -45.4%   0.32   -37.1% (2022) 603d (~29m) |
+       15% 3.00x       45%      280% |  +15.9%   0.76    1.06 |    -52.5%   0.30   -43.8% (2022) 921d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       20% 1.00x       20%       98% |   +9.6%   1.15    1.59 |    -24.0%   0.40   -18.6% (2022) 566d (~27m) |
+       20% 1.25x       25%      122% |  +10.6%   1.03    1.43 |    -29.8%   0.36   -23.5% (2022) 578d (~28m) |
+       20% 1.50x       30%      147% |  +11.6%   0.95    1.31 |    -35.5%   0.33   -28.5% (2022) 580d (~28m) |
+       20% 1.75x       35%      171% |  +12.5%   0.89    1.23 |    -40.7%   0.31   -33.2% (2022) 583d (~28m) |
+       20% 2.00x       40%      196% |  +13.3%   0.84    1.16 |    -45.6%   0.29   -37.7% (2022) 604d (~29m) |
+       20% 2.50x       50%      245% |  +14.9%   0.78    1.07 |    -54.2%   0.27   -46.0% (2022) 634d (~30m) |
+       20% 3.00x       60%      293% |  +16.3%   0.73    1.01 |    -61.7%   0.26   -53.4% (2022) 923d (~44m) |  <- maior CAGR da grade
+  ············································································································
+  REFERENCIA beta cru (buy&hold eq-weight): CAGR +16.0% · Sharpe 0.97 · MaxDD -38.8% · Calmar 0.41.
+  expo-alvo = vol-alvo x lev (vol 'tomada' mirada). gross med = exposicao REAL media carregada (menor: o vol-target deixa caixa).
+  NOTA: 'maior CAGR da grade' (3x) NAO e a Kelly — o CAGR ainda sobe alem de 3x; a Kelly real fica
+  em L muito maior, com DD catastrofico (ver veredito). A grade para em 3x porque alem disso o DD ja e in-investivel.
+
+================================================================================================
+(2b) VARIANTE: cripto 2%/nome (tilt defensivo / pro-acoes)
+================================================================================================
+  vol-alvo   lev expo-alvo gross med |    CAGR Sharpe Sortino | MaxDD(bt) Calmar        pior ano    maior DD |
+  ------------------------------------------------------------------------------------------------------------
+       10% 1.00x       10%       76% |   +6.8%   1.17    1.65 |    -13.2%   0.52    -9.2% (2022) 574d (~27m) |
+       10% 1.25x       12%       95% |   +8.1%   1.12    1.58 |    -16.3%   0.50   -11.5% (2022) 574d (~27m) |
+       10% 1.50x       15%      114% |   +9.1%   1.05    1.48 |    -19.4%   0.47   -13.7% (2022) 578d (~28m) |
+       10% 1.75x       18%      133% |   +9.9%   0.98    1.38 |    -22.5%   0.44   -16.0% (2022) 579d (~28m) |
+       10% 2.00x       20%      152% |  +10.5%   0.92    1.30 |    -25.6%   0.41   -18.3% (2022) 580d (~28m) |
+       10% 2.50x       25%      190% |  +11.7%   0.84    1.18 |    -31.8%   0.37   -23.4% (2022) 597d (~28m) |
+       10% 3.00x       30%      228% |  +12.7%   0.78    1.09 |    -37.6%   0.34   -28.4% (2022) 926d (~44m) |  <- maior CAGR da grade
+  ············································································································
+       12% 1.00x       12%       86% |   +7.9%   1.18    1.67 |    -15.7%   0.50   -11.0% (2022) 574d (~27m) |
+       12% 1.25x       15%      108% |   +9.2%   1.10    1.55 |    -19.4%   0.47   -13.7% (2022) 578d (~28m) |
+       12% 1.50x       18%      129% |  +10.0%   1.01    1.42 |    -23.1%   0.43   -16.5% (2022) 579d (~28m) |
+       12% 1.75x       21%      151% |  +10.8%   0.94    1.33 |    -26.8%   0.40   -19.3% (2022) 580d (~28m) |
+       12% 2.00x       24%      172% |  +11.5%   0.89    1.25 |    -30.6%   0.38   -22.4% (2022) 583d (~28m) |
+       12% 2.50x       30%      215% |  +12.8%   0.81    1.14 |    -37.6%   0.34   -28.4% (2022) 923d (~44m) |
+       12% 3.00x       36%      258% |  +14.0%   0.76    1.07 |    -44.1%   0.32   -34.1% (2022) 938d (~45m) |  <- maior CAGR da grade
+  ············································································································
+       15% 1.00x       15%       94% |   +8.8%   1.17    1.64 |    -19.0%   0.47   -13.6% (2022) 573d (~27m) |
+       15% 1.25x       19%      118% |   +9.9%   1.05    1.47 |    -23.6%   0.42   -17.0% (2022) 578d (~28m) |
+       15% 1.50x       22%      142% |  +10.8%   0.96    1.35 |    -28.2%   0.38   -20.6% (2022) 580d (~28m) |
+       15% 1.75x       26%      165% |  +11.6%   0.90    1.26 |    -32.7%   0.35   -24.5% (2022) 583d (~28m) |
+       15% 2.00x       30%      189% |  +12.3%   0.85    1.19 |    -37.0%   0.33   -28.2% (2022) 601d (~29m) |
+       15% 2.50x       38%      236% |  +13.7%   0.78    1.09 |    -44.9%   0.30   -35.2% (2022) 633d (~30m) |
+       15% 3.00x       45%      283% |  +14.9%   0.73    1.03 |    -51.9%   0.29   -41.7% (2022) 938d (~45m) |  <- maior CAGR da grade
+  ············································································································
+       20% 1.00x       20%       98% |   +9.1%   1.13    1.58 |    -23.2%   0.39   -16.7% (2022) 579d (~28m) |
+       20% 1.25x       25%      123% |  +10.0%   1.01    1.41 |    -29.1%   0.35   -21.5% (2022) 583d (~28m) |
+       20% 1.50x       30%      147% |  +10.9%   0.92    1.29 |    -34.6%   0.31   -26.2% (2022) 605d (~29m) |
+       20% 1.75x       35%      172% |  +11.6%   0.86    1.20 |    -39.8%   0.29   -30.7% (2022) 634d (~30m) |
+       20% 2.00x       40%      197% |  +12.4%   0.81    1.13 |    -44.6%   0.28   -35.1% (2022) 654d (~31m) |
+       20% 2.50x       50%      246% |  +13.7%   0.74    1.04 |    -53.2%   0.26   -43.1% (2022) 672d (~32m) |
+       20% 3.00x       60%      295% |  +14.9%   0.70    0.97 |    -60.7%   0.24   -50.4% (2022) 938d (~45m) |  <- maior CAGR da grade
+  ············································································································
+  REFERENCIA beta cru (buy&hold eq-weight): CAGR +16.0% · Sharpe 0.97 · MaxDD -38.8% · Calmar 0.41.
+  expo-alvo = vol-alvo x lev (vol 'tomada' mirada). gross med = exposicao REAL media carregada (menor: o vol-target deixa caixa).
+  NOTA: 'maior CAGR da grade' (3x) NAO e a Kelly — o CAGR ainda sobe alem de 3x; a Kelly real fica
+  em L muito maior, com DD catastrofico (ver veredito). A grade para em 3x porque alem disso o DD ja e in-investivel.
+
+================================================================================================
+(3) COMPORTAMENTO EM CRISE (retorno acumulado, historico INTEIRO) — base cripto 5%/nome
+================================================================================================
+  ponto                      |   2008 (GFC) |  2020 (COVID) |  2022 (Bear)
+  ------------------------------------------------------------------------
+  vol10% L=1.00x [min]       |        -0.3% |         +0.5% |       -10.0%
+  vol10% L=3.00x [max-grade] |        -5.1% |         -0.7% |       -29.7%
+  ········································································
+  vol12% L=1.00x [min]       |        -0.3% |         +0.6% |       -11.9%
+  vol12% L=3.00x [max-grade] |        -7.6% |         -1.5% |       -35.5%
+  ········································································
+  vol15% L=1.00x [min]       |        -0.5% |         +0.5% |       -14.7%
+  vol15% L=3.00x [max-grade] |       -11.4% |         -3.0% |       -43.5%
+  ········································································
+  vol20% L=1.00x [min]       |        +0.1% |         +1.4% |       -18.5%
+  vol20% L=3.00x [max-grade] |       -13.4% |         -0.9% |       -53.2%
+  ········································································
+  BUY&HOLD beta cru          |        -7.8% |         +5.5% |       -29.3%
+  LEITURA: a alavancagem AMPLIFICA a crise proporcionalmente — 2022 (cesta inteira caiu)
+  vai de ~-10% (1x) a ~-30% (3x); 2008 piora pouco (a cesta ja era pouco exposta la). E o
+  retrato de como o seu DD real se comporta no pior cenario de cada nivel de L escolhido.
+
+================================================================================================
+(4) SENSIBILIDADE (Kelly e veredito NAO dependem de uma escolha fina de param)
+================================================================================================
+  (i) CAGR ao longo da GRADE-CARDAPIO (vol-alvo 10%) por taxa de financiamento:
+    financiamento  |      L=1.00x |      L=1.25x |      L=1.50x |      L=1.75x |      L=2.00x |      L=2.50x |      L=3.00x
+    -----------------------------------------------------------------------------------------------------------------------
+      3.0% a.a.    |        +6.9% |        +8.5% |        +9.8% |       +11.1% |       +12.3% |       +14.5% |       +16.7%
+      5.5% a.a.    |        +6.9% |        +8.3% |        +9.4% |       +10.2% |       +10.9% |       +12.2% |       +13.3%
+      8.0% a.a.    |        +6.9% |        +8.1% |        +8.9% |        +9.3% |        +9.6% |        +9.9% |       +10.1%
+    (DENTRO da grade o CAGR so sobe com L — a Kelly esta alem de 3x. Financiamento maior
+     so tira um pedaco de cada degrau alavancado; o 1.0x nao usa margem, nao muda.)
+
+  (ii) KELLY VERDADEIRA (busca fina ate 12x) por taxa — confirma o turnover e a robustez:
+    financiamento  | Kelly L (real) | CAGR no pico | MaxDD backtest
+    ---------------------------------------------------------------
+      3.0% a.a.    |       >=12.0x |       +41.2% |         -88.5%
+      5.5% a.a.    |         8.50x |       +19.3% |         -78.5%
+      8.0% a.a.    |         3.50x |       +10.1% |         -44.3%
+    (financiamento maior puxa a Kelly p/ baixo, mas mesmo a 8% ela fica em ~3.5x com DD
+     backtest ~-44% (~-62% ao vivo); a taxas menores e ainda mais alta/profunda. IN-INVESTIVEL
+     em qualquer taxa razoavel -> o veredito (DD binda antes da Kelly) e robusto, nao overfit.)

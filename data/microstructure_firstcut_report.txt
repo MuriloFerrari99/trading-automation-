@@ -1,0 +1,132 @@
+==============================================================================
+SYSTEM 3 — FIRST-CUT BARATO DA FASE 2: O TRADE-FLOW SOBREVIVE A CUSTO?
+==============================================================================
+
+Gate de KILL-BARATO antes do build pesado (coleta L2 ao vivo + MM completo).
+Pergunta: o RETORNO BRUTO/trade (bps) do sinal de trade-flow — ja penalizado
+pela latencia de varejo (~100ms) — bate o CUSTO taker? bate o maker? Quao longe?
+First-cut GENEROSO: se morre aqui, morre de verdade.
+
+------------------------------------------------------------------------------
+VEREDITO (honesto — first-cut GENEROSO; nao suavizado)
+
+  Melhor edge BRUTO/trade observado: +0.126 bps (BTCUSDT, q=0.90, h=5s, n=172,721, 34,544 trades/dia, win=42.2%).
+  Custos round-trip (bps): TAKER=8.75 | MAKER(so fee)=2.00 | MAKER(ganha spread)=+1.25.
+
+  (a) TAKER: NAO tradavel. Bruto/trade +0.126 bps vs custo 8.75 bps => deficit de -8.624 bps/trade. O bruto e ~1% do custo taker. Scalp direcional-taker MORRE no custo, como esperado.
+
+  (b) MAKER: o bruto/trade (+0.126) fica ABAIXO ate do caso mais generoso (maker-ganha-spread, +1.25; deficit -1.124 bps). Nem um MM ideal que capture todo o spread sobrevive. System 3 MORTO ate generoso.
+
+  >>> DECISAO: MATAR BARATO. Arquivar o System 3 (track de microestrutura direcional). O edge bruto nao sobrevive nem ao caso de custo mais generoso; construir coleta L2 + MM completo seria queimar tempo. O IC da Fase 1 era real porem pequeno demais p/ a latencia/custo de varejo — confirma a nota 'IC != lucro'.
+
+  Tribunal [taker]: Sharpe/trade(net)=-7.3815 t-stat=-3067.7 DSR=0.000 (DSR>=0.95? NAO) PSR=0.000 PBO=0.00 net/trade=-8.624 bps n_trials=20.
+  Tribunal [maker_fee_only]: Sharpe/trade(net)=-1.6043 t-stat=-666.8 DSR=0.000 (DSR>=0.95? NAO) PSR=0.000 PBO=0.00 net/trade=-1.874 bps n_trials=20.
+  Tribunal [maker_earns_spread]: Sharpe/trade(net)=-0.9624 t-stat=-400.0 DSR=0.000 (DSR>=0.95? NAO) PSR=0.000 PBO=0.00 net/trade=-1.124 bps n_trials=20.
+  (PBO alto / DSR baixo na serie liquida = a 'melhor' celula e sorte do sweep, nao edge real — reforca o veredito.)
+
+------------------------------------------------------------------------------
+PREMISSAS E DESENHO (declarados)
+------------------------------------------------------------------------------
+  Sinal           : tfi (trade-flow imbalance por volume), janela 5s.
+                    (vencedor da Fase 1: IC ~0.07, prevê 1-5s — ver microstructure.ic)
+  Grade fina      : 250 ms (aciona o sinal nesta cadencia).
+  LATENCIA varejo : 100 ms. Sinal em t -> acionavel em t+100ms.
+                    Entrada paga o preco do ULTIMO TRADE <= t+lat (NAO o de t).
+                    => penaliza latencia e remove look-ahead.
+  Horizontes      : [1, 5] s (segura o horizonte do sinal e sai).
+  Limiares        : quantis de |sinal| = [0.5, 0.8, 0.9, 0.95, 0.99] (so trades acima).
+  Preco de ref.   : last-trade price (bookTicker historico 404 no arquivo).
+
+  CUSTOS round-trip (bps) — premissas:
+    taker_fee/lado = 4.00 bps ; maker_fee/lado = 1.00 bps ; spread cruzado = 0.75 bps
+    -> TAKER round-trip          = 2x4.0 + 0.75 = 8.75 bps
+    -> MAKER round-trip (so fee) = 2x1.0            = 2.00 bps
+    -> MAKER (ganha o spread)    = 2x1.0 - 0.75    = +1.25 bps
+
+------------------------------------------------------------------------------
+DADOS
+------------------------------------------------------------------------------
+  BTCUSDT    aggTrades (um): 5 dia(s) [2026-06-10, 2026-06-11, 2026-06-12, 2026-06-13, 2026-06-14]
+  ETHUSDT    aggTrades (um): 5 dia(s) [2026-06-10, 2026-06-11, 2026-06-12, 2026-06-13, 2026-06-14]
+
+------------------------------------------------------------------------------
+(1) EDGE BRUTO/trade (bps) POR LIMIAR x HORIZONTE  +  LIQUIDO vs CUSTO
+------------------------------------------------------------------------------
+  GROSS/tr = edge bruto medio/trade (bps); cumGROSS = soma bruta (bps);
+  net_tk = GROSS - custo taker ; net_mk = GROSS - maker(so fee) ;
+  net_mk+s = GROSS - maker(ganha spread). Positivo = sobrevive aquele custo.
+
+  ### BTCUSDT — sweep limiar(quantil) x horizonte
+      q  thr|sig|   h    trades   tr/dia  GROSS/tr      med   win%    cumGROSS   net_tk   net_mk  net_mk+s
+  --------------------------------------------------------------------------------------------------------
+   0.50    0.6054  1s   863,658  172,732    +0.043   +0.000  31.8%    +36938.2   -8.707   -1.957    -1.207
+   0.50    0.6054  5s   863,618  172,724    +0.085   +0.000  43.6%    +73700.0   -8.665   -1.915    -1.165
+   0.80    0.8844  1s   345,468   69,094    +0.050   +0.000  30.4%    +17417.4   -8.700   -1.950    -1.200
+   0.80    0.8844  5s   345,445   69,089    +0.113   +0.000  43.3%    +38954.4   -8.637   -1.887    -1.137
+   0.90    0.9519  1s   172,734   34,547    +0.053   +0.000  28.6%     +9095.8   -8.697   -1.947    -1.197
+   0.90    0.9519  5s   172,721   34,544    +0.126   +0.000  42.2%    +21679.3   -8.624   -1.874    -1.124
+   0.95    0.9795  1s    86,367   17,273    +0.051   +0.000  26.5%     +4407.5   -8.699   -1.949    -1.199
+   0.95    0.9795  5s    86,367   17,273    +0.121   +0.000  40.7%    +10491.1   -8.629   -1.879    -1.129
+   0.99    0.9980  1s    17,273    3,455    +0.028   +0.000  16.2%      +479.5   -8.722   -1.972    -1.222
+   0.99    0.9980  5s    17,273    3,455    +0.072   +0.000  30.4%     +1251.5   -8.678   -1.928    -1.178
+
+  ### ETHUSDT — sweep limiar(quantil) x horizonte
+      q  thr|sig|   h    trades   tr/dia  GROSS/tr      med   win%    cumGROSS   net_tk   net_mk  net_mk+s
+  --------------------------------------------------------------------------------------------------------
+   0.50    0.6054  1s   863,774  172,756    +0.041   +0.000  30.9%    +35473.1   -8.709   -1.959    -1.209
+   0.50    0.6054  5s   863,724  172,746    +0.079   +0.000  43.3%    +68600.8   -8.671   -1.921    -1.171
+   0.80    0.9017  1s   345,509   69,102    +0.045   +0.000  27.5%    +15697.5   -8.705   -1.955    -1.205
+   0.80    0.9017  5s   345,472   69,095    +0.100   +0.000  41.7%    +34398.6   -8.650   -1.900    -1.150
+   0.90    0.9683  1s   172,754   34,551    +0.042   +0.000  24.4%     +7323.4   -8.708   -1.958    -1.208
+   0.90    0.9683  5s   172,753   34,551    +0.100   +0.000  39.8%    +17229.3   -8.650   -1.900    -1.150
+   0.95    0.9911  1s    86,375   17,275    +0.031   +0.000  20.3%     +2694.9   -8.719   -1.969    -1.219
+   0.95    0.9911  5s    86,375   17,275    +0.069   +0.000  36.4%     +5991.7   -8.681   -1.931    -1.181
+   0.99    1.0000  1s    17,275    3,455    +0.008   +0.000  14.2%      +137.2   -8.742   -1.992    -1.242
+   0.99    1.0000  5s    17,275    3,455    +0.030   +0.000  31.7%      +510.9   -8.720   -1.970    -1.220
+
+------------------------------------------------------------------------------
+(2) O EDGE BRUTO BATE O CUSTO?  (resumo, melhor celula por simbolo)
+------------------------------------------------------------------------------
+  BTCUSDT: melhor GROSS/tr = +0.126 bps (q=0.90, h=5s).
+      vs taker                +8.75 bps -> NAO bate (gap -8.624) (1% do custo)
+      vs maker_fee_only       +2.00 bps -> NAO bate (gap -1.874) (6% do custo)
+      vs maker_earns_spread   +1.25 bps -> NAO bate (gap -1.124) (10% do custo)
+  ETHUSDT: melhor GROSS/tr = +0.100 bps (q=0.90, h=5s).
+      vs taker                +8.75 bps -> NAO bate (gap -8.650) (1% do custo)
+      vs maker_fee_only       +2.00 bps -> NAO bate (gap -1.900) (5% do custo)
+      vs maker_earns_spread   +1.25 bps -> NAO bate (gap -1.150) (8% do custo)
+
+------------------------------------------------------------------------------
+(3) TRIBUNAL (DSR/PBO) NA SERIE LIQUIDA — anti data-snooping
+------------------------------------------------------------------------------
+  n_trials honesto = 20 (= # celulas limiar x horizonte x simbolo varridas).
+  Serie = retorno LIQUIDO por trade (bruto - custo) na melhor celula de cada cenario.
+
+  Sharpe e POR TRADE (nao anualizado: 34k trades/dia anualizado da numero
+  absurdo). t-stat = significancia de mean(net)!=0. DSR/PSR penalizam o n_trials.
+
+  cenario                SR/trade    t-stat     PSR     DSR    PBO  net/tr_bps      n_tr
+  --------------------------------------------------------------------------------------
+  taker                   -7.3815   -3067.7   0.000   0.000   0.00      -8.624   172,721
+  maker_fee_only          -1.6043    -666.8   0.000   0.000   0.00      -1.874   172,721
+  maker_earns_spread      -0.9624    -400.0   0.000   0.000   0.00      -1.124   172,721
+
+  Leitura: net/trade NEGATIVO com t-stat fortemente negativo => o prejuizo
+  liquido e estatisticamente CERTO (nao ruido). DSR=0 / PSR=0 => zero chance
+  de o Sharpe liquido verdadeiro ser > 0. Barra do projeto: DSR>=0.95 e SR>0.
+
+------------------------------------------------------------------------------
+CAVEATS OBRIGATORIOS
+------------------------------------------------------------------------------
+  - SPREAD e ASSUMIDO. Nao ha L2 real: bookTicker historico esta 404 no arquivo
+    publico (data.binance.vision). O spread cruzado e premissa, nao medicao.
+  - NAO HA MODELO DE FILA NEM DE ADVERSE-SELECTION. Esse e o build pesado. Aqui o
+    maker e tratado de forma GENEROSA (preenche sempre, no preco do sinal-latencia).
+    Um maker REAL renderia MENOS: perde fila quando o sinal e obvio (selecao adversa)
+    e nem sempre e preenchido. Logo o caso maker aqui e um TETO, nao uma estimativa.
+  - LAST-TRADE PRICE como mid infla ruido (bid-ask bounce) mas nao da look-ahead.
+  - LIMIAR por quantil e in-sample (sweep generoso p/ achar o regime extremo); nao
+    e um classificador OOS. O DSR/PBO ja penaliza o n_trials desse sweep.
+  - First-cut GENEROSO em todas as frentes. Se o edge bruto morre AQUI, morre de
+    verdade; se fica na faixa maker-viavel, o build pesado se justifica.
+

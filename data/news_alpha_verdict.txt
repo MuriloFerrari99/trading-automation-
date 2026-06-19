@@ -1,0 +1,30 @@
+ALPHA DE SENTIMENTO DE NOTICIAS — cross-sectional, point-in-time, market-neutral
+Sinal = EWMA do sentimento (Loughran-McDonald estendido) das manchetes (Alpaca/Benzinga).
+Posicao de t aplicada em t+1 (sem look-ahead). Custo por turnover (6bps RT).
+corr = correlacao com a cesta EW (proximo de 0 => ortogonal ao beta = alpha de verdade).
+
+config                             Sharpe    CAGR   MaxDD   corr     PSR     DSR  veredito
+------------------------------------------------------------------------------------------------
+Cesta EW long-only (BETA alvo)       1.14    23.9%   -31.0%      -   0.998   0.998  PASSA
+------------------------------------------------------------------------------------------------
+L/S sentimento (halflife=2)         -0.20    -3.9%   -56.7%  +0.14   0.302   0.035  FALHA
+L/S sentimento (halflife=3)         -0.36    -6.2%   -63.2%  +0.15   0.174   0.013  FALHA
+L/S sentimento (halflife=5)         -0.20    -4.1%   -54.0%  +0.19   0.299   0.034  FALHA
+L/S sentimento (halflife=8)         -0.04    -1.8%   -46.8%  +0.21   0.458   0.080  FALHA
+L/S sentimento (halflife=13)         0.31     3.6%   -34.0%  +0.26   0.791   0.311  FALHA
+------------------------------------------------------------------------------------------------
+melhor L/S BRUTO (hl=13, s/custo)    0.57     8.0%   -27.5%  +0.26   0.933   0.933  FALHA
+
+------------------------------------------------------------------------------------------------
+VARIANTES TESTADAS (resumo) — melhor Sharpe LIQUIDO por familia:
+  momentum (segue sentimento)   : 0.31  (diario, hl=13)        DSR 0.31  FALHA
+  fade (contra, overreaction)   : ~0.0  (custo de giro destroi) FALHA
+  baixo giro (semanal, hl=21)   : 0.55  (rebal 5d)             DSR 0.50  FALHA
+BRUTO (sem custo) max ~0.57 -> custo de turnover e o gargalo, mas o sinal e fraco demais.
+
+VEREDITO: sentimento de manchete (LM, 26 large-caps, diario/semanal) e um sinal
+REAL porem FRACO e ORTOGONAL (corr ~+0.2 com a cesta). NAO passa o tribunal como
+estrategia standalone (precisa DSR>=0.95 E Sharpe>=0.8; melhor liquido ~0.55).
+DIFERENCA vs estrategias de preco: esta e genuinamente ortogonal ao beta -> tem
+valor MARGINAL como TILT/overlay ou EMPILHADA com outras alt-data (insiders Form 4),
+nao como alpha sozinho. Large-caps liquidas = news quase totalmente arbitrado.

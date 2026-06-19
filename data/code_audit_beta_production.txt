@@ -1,0 +1,330 @@
+================================================================================
+AUDITORIA ADVERSARIAL — CADEIA DE PRODUCAO DO BETA (ultimo portao antes do paper)
+Auditor: O CODER (independente, read-only). Data: 2026-06-15.
+Pergunta central: e SEGURO ligar BETA_LIVE_ENABLED e deixar rodar no paper Alpaca
+gravando o track record que vai embasar AUM?
+================================================================================
+
+VEREDITO: ***NAO LIGAR ATE CORRIGIR.***
+
+Ha UM bloqueador critico (conflito do trailing-stop) que, sozinho, CORROMPE a
+tese e o track record, e UM bug de fidelidade (lag mensal do gatilho) que faz o
+NAV do paper divergir SISTEMATICAMENTE do backtest auditado todo mes. Ambos sao
+MUST-FIX. Ha ainda landmines de cripto (latentes enquanto BTC/ETH=0%) e um
+acoplamento de risco entre os dois books que precisa ser uma DECISAO consciente.
+
+A boa noticia: a paridade peso-vivo == peso-backtest e REAL e bit-a-bit (0.0), e
+o caminho flag-OFF e genuinamente inerte. O nucleo de pesos esta correto. O que
+quebra esta na PONTE para producao (gatilho, execucao, books compartilhados) e
+no SISTEMA-BASE que vai pisar nas posicoes do beta.
+
+--------------------------------------------------------------------------------
+LISTA PRIORIZADA DE MUST-FIX
+--------------------------------------------------------------------------------
+
+================================================================================
+[MF-1] CRITICO / BLOQUEADOR — Trailing-stop do sistema-base liquida o book do beta
+================================================================================
+ARQUIVOS: strategies/trailing_stop.py:38-86 ; main.py:242-246 ; config/risk.py:37-39
+
+O QUE ACONTECE (provado empiricamente):
+  - main.py:243 instancia TrailingStopStrategy(get_risk_settings().default_trailing_stop_pct).
+    default_trailing_stop_pct = 0.10 (config/risk.py:37-39). Essa estrategia roda
+    em TODO ciclo do Monitor, INDEPENDENTE da flag do beta (esta no pipeline base).
+  - trailing_stop.py:46 itera `self._open_longs(ctx)` = ctx.broker.get_positions()
+    — TODOS os longs do broker, NAO so a watchlist. O proprio docstring (linha 44-48)
+    diz "Protege TODO long aberto (broker = verdade), nao so os da watchlist".
+  - Para uma posicao do beta (ex.: SPY), watchlist.get('SPY') -> None
+    (a watchlist shipada tem so AAPL e MSFT). Com item=None: asset_class='equity'
+    (linha 50), ladder=None (linha 56 nao pula), e pct cai no `self._default_pct`
+    = 10% (linhas 62-68). Resultado: emite SELL trailing_stop de 100% da posicao.
+
+  REPRODUCAO (FakeBroker, wiring exato do main.py):
+    posicao SPY de \$50k (criada pelo rebalancer) ->
+    intent: SELL 100 SPY type=trailing_stop trail=10.00% strategy=trailing_stop
+
+  CONSEQUENCIA: o broker rastreia o high-water e, numa queda de 10% de QUALQUER
+  ativo do beta (SPY/QQQ/TLT/IEF/GLD/SLV/BTC/ETH), VENDE a posicao inteira a
+  mercado. Isso e exatamente o oposto da tese vol-target/rebalance (que NAO usa
+  stop por ativo; a defesa de cauda e o hedge condicional + o DD-halt do book).
+  Pior: o rebalance mensal seguinte RE-COMPRA o ativo zerado -> turnover absurdo,
+  custos, e o NAV diverge sem volta do backtest auditado. O track record que vai
+  embasar AUM fica medindo "vol-target + stop de 10% por ativo", que NAO e o
+  produto auditado em beta_v2.
+
+  AGRAVANTES:
+   - CRIPTO 24/7: asset_tradable_now('crypto', ...) = True (market_clock.py:20),
+     entao o trailing de BTC/ETH dispara ate com o pregao de acoes fechado.
+   - O client_order_id do intent inclui created_at=_utcnow() (models.py:65,79-84),
+     que muda a cada ciclo; a unica coisa que impede recolocar o trailing toda
+     rodada e o filtro _open_trailing_symbols (trailing_stop.py:59,98-108). Ou
+     seja: basta a ordem trailing existir 1x para "fixar", mas ela SERA colocada
+     no 1o ciclo apos a posicao aparecer.
+
+  POR QUE A PARIDADE NAO PEGOU ISSO: o teste de paridade so compara vetores de
+  peso; nao simula o pipeline base rodando junto. O conflito e entre DOIS books
+  no MESMO broker, fora do escopo do beta_rebalancer.
+
+CORRECAO EXATA (escolher 1; recomendo a (a)):
+  (a) ISENTAR o universo do beta do trailing-stop. Em strategies/trailing_stop.py,
+      no laco `for position in self._open_longs(ctx)`, pular simbolos do universo
+      do beta. Concretamente, injetar um conjunto de simbolos protegidos por
+      outro book e pular:
+        from strategies.beta_rebalancer import UNIVERSE? -> melhor: passar uma
+        lista `excluded_symbols: set[str]` no __init__ de TrailingStopStrategy e,
+        em main.py, quando beta_live_enabled(), construir
+        TrailingStopStrategy(pct, excluded_symbols={to_broker_symbol(a.ticker)
+        for a in UNIVERSE}). No evaluate: `if symbol.upper() in self._excluded:
+        continue` ANTES de qualquer logica. Mantem o comportamento legado quando
+        o set e vazio (flag off).
+      ATENCAO: a exclusao deve usar os simbolos NA FORMA DO BROKER (BTC/USD), que
+      e a forma como get_positions retorna o long do beta — usar to_broker_symbol.
+  (b) Alternativa mais forte: marcar as posicoes por book (tag de estrategia) e o
+      trailing so proteger longs cuja origem NAO seja o beta. Exige Position com
+      campo de book (nao existe hoje — models.py:103-115) ou um mapa local
+      simbolo->book. Mais invasivo; (a) resolve com cirurgia minima.
+  (c) Se o objetivo de longo prazo for separar os books, isolar o trailing para
+      operar so sobre watchlist.symbols() (nao sobre get_positions()). Muda o
+      contrato "protege orfas tambem"; decisao de produto, nao so de codigo.
+
+  TESTE DE REGRESSAO A ADICIONAR: com um SPY seedado no broker e SPY fora da
+  watchlist + excluded_symbols={'SPY'}, TrailingStopStrategy.evaluate() retorna [].
+
+================================================================================
+[MF-2] ALTO — Lag de 1 dia no gatilho mensal: NAV do paper diverge do backtest
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:172-185 (is_rebalance_due) +
+          strategies/beta_live.py:97-118 ; vs simulation/beta_portfolio.py:226-234
+          (_rebalance_mask) + beta_v2.py:206 (.shift(1))
+
+O QUE ACONTECE (provado empiricamente):
+  - No backtest, o rebalance e calculado no 1o dia de pregao do mes `r`
+    (_rebalance_mask), mas o vetor de pesos sofre .shift(1) (beta_v2.py:206 /
+    beta_portfolio _hold_between_rebalances). Logo, os NOVOS pesos so passam a
+    valer (e o backtest so "negocia" para eles) no dia `r+1` (2o pregao do mes),
+    usando dados de fechamento ATE `r`.
+  - No vivo, is_rebalance_due dispara na PRIMEIRA vez que o mes-calendario muda
+    vs o ultimo mes persistido — ou seja, JA no dia `r`. Nesse dia,
+    target_weights_for_date(asof=r) devolve wf.loc[r] = held.shift(1).loc[r] =
+    os pesos do mes ANTERIOR (ainda nao atualizados). O rebalancer entao negocia
+    o diff em direcao ao alvo VELHO, e beta_live.py:118 chama mark_rebalanced(r)
+    -> o mes fica resolvido e NUNCA mais rebalanceia naquele mes. Os pesos novos
+    (que so aparecem em wf.loc[r+1]) JAMAIS sao negociados ate o proximo mes.
+
+  EVIDENCIA (mes 2026-03, dado real do cache):
+    wf.loc[2026-02-27] = {SPY .289, QQQ .206, IEF .901, GLD .104}  (mes anterior)
+    wf.loc[2026-03-02] = {SPY .289, QQQ .206, IEF .901, GLD .104}  <- asof=r: IGUAL ao anterior
+    wf.loc[2026-03-03] = {SPY .317, QQQ .227, IEF .864, GLD .092}  <- r+1: pesos NOVOS
+    live target asof=r == pesos do dia anterior: True
+    gap L1 entre o que o vivo negocia (asof=r) e o alvo pretendido (r+1) = 0.098
+    (~10% do gross alocado errado, TODO mes, de forma persistente).
+
+  CONSEQUENCIA: o paper sempre carrega o alvo do mes ANTERIOR (defasagem de um
+  rebalance). Nao e catastrofico em retorno, mas e um VIES SISTEMATICO e mensuravel
+  que separa o track record do backtest auditado. Para um track record que vende
+  AUM, "o vivo nao reproduz o backtest" e exatamente o que nao pode acontecer.
+
+  POR QUE A PARIDADE NAO PEGOU: o teste prova target_weights_for_date(d) ==
+  wf_full.loc[d] (identidade da FUNCAO de peso). Nao prova que o GATILHO dispara
+  no dia em que os pesos REALMENTE mudam. Ambos os lados leem a mesma linha
+  defasada, entao "batem" — mas a linha esta um dia adiantada vs a decisao real.
+
+CORRECAO EXATA:
+  Alinhar o gatilho vivo ao dia em que os pesos mudam (r+1), OU mudar o asof.
+  Opcao A (minima, recomendada): no caminho vivo, disparar o rebalance no 2o
+    pregao do mes, nao no 1o. Em is_rebalance_due / beta_live, so considerar
+    "devido" quando asof for >= o 2o dia de pregao do mes corrente (i.e., quando
+    o mes mudou E existe pelo menos 1 pregao anterior dentro do mes corrente no
+    painel). Equivalente: detectar a mudanca de mes em asof-1 (nao em asof) — o
+    mesmo criterio do backtest (_rebalance_mask olha index vs index anterior, e o
+    peso entra em vigor no dia seguinte).
+  Opcao B: manter o gatilho no dia r, mas pedir o alvo de wf.loc[r] APOS recomputar
+    como se fosse r+1 — NAO recomendado (reintroduz risco de look-ahead).
+  A intencao do backtest e clara: pesos decididos com dados<=r, negociados em r+1.
+  O vivo deve fazer o MESMO: rebalancear em r+1 usando asof=r. Hoje ele rebalanceia
+  em r usando asof=r (que ainda reflete o rebalance anterior).
+
+  TESTE A ADICIONAR: para um boundary de mes r no painel real, after rebalancing
+  no fluxo vivo o target negociado deve == wf.loc[r+1], nao wf.loc[r].
+
+================================================================================
+[MF-3] ALTO (latente hoje; vira CRITICO quando crypto>0) — Cripto quebra em producao
+================================================================================
+ARQUIVOS: broker/alpaca_broker.py:85-90 (get_last_price) ; :96-108 (get_bars) ;
+          :74-83 (_to_position) ; core/models.py:59 (TimeInForce.DAY default)
+
+Hoje os pesos-alvo de BTC-USD/ETH-USD estao em 0.0 (verificado no cache atual),
+entao isto NAO dispara AGORA. Mas e uma bomba-relogio: assim que o vol-target
+alocar a cripto (qualquer mes), o caminho vivo faz a coisa errada.
+
+  (3a) get_last_price (alpaca_broker.py:85-90) usa StockLatestTradeRequest /
+       get_stock_latest_trade. Para 'BTC/USD' isso LANCA/retorna vazio. Em
+       beta_rebalancer._safe_price (beta_rebalancer.py:264-271) a excecao e
+       engolida -> price=None -> o ativo de cripto cai em plan.blocked ("sem
+       preco") e NUNCA e negociado. Em reporting/capture._market_value
+       (capture.py:44-53) o fallback e avg_entry_price (preco de ENTRADA, NAO
+       mark-to-market) -> o NAV do dia fica MISMARCADO p/ a cripto -> corrompe a
+       propria serie que o track record sela.
+  (3b) get_bars (alpaca_broker.py:96-108) tambem e stock-only. Afeta so o regime
+       (SPY) hoje; nao bloqueia o rebalance, mas e a mesma classe de bug.
+  (3c) Identidade do simbolo da posicao: _to_position usa p.symbol cru da Alpaca.
+       Posicoes de cripto na Alpaca podem voltar como 'BTCUSD' (sem barra) em vez
+       de 'BTC/USD'. _current_weights (beta_rebalancer.py:251-262) faz
+       positions.get(to_broker_symbol(tkr)) = positions.get('BTC/USD'). Se a
+       Alpaca devolver 'BTCUSD', o lookup ERRA -> peso atual lido como 0 -> o
+       rebalancer acha que nao tem cripto e COMPRA de novo (dobra a posicao).
+  (3d) TimeInForce: OrderIntent default = DAY (models.py:59). A Alpaca REJEITA
+       ordens de cripto com TIF=day (cripto exige GTC). Ordens de rebalance de
+       cripto seriam rejeitadas no Executor.
+
+CORRECAO EXATA (fazer ANTES de permitir peso de cripto > 0):
+  - get_last_price / get_bars: rotear cripto (symbol contem '/') para
+    CryptoLatestTradeRequest / get_crypto_latest_trade e CryptoBarsRequest /
+    get_crypto_bars do alpaca-py. Detectar cripto por '/' no simbolo.
+  - _to_position: normalizar o simbolo de cripto para a forma 'BASE/USD'
+    (inserir a barra) OU normalizar nos dois lados do lookup em _current_weights.
+  - submit_order p/ cripto: forcar time_in_force=GTC quando o simbolo for cripto
+    (no _build_order_request, alpaca_broker.py:158+), ou setar TIF=GTC no
+    OrderIntent de cripto no beta_rebalancer._plan_symbol.
+  - GUARD-RAIL ja: enquanto (3a-d) nao estiverem corrigidos, travar crypto_max a
+    0 ou abortar o rebalance se algum alvo de cripto != 0 (fail-closed), p/ nao
+    ligar com a cripto meio-quebrada.
+
+================================================================================
+[MF-4] MEDIO/ALTO — Books compartilham risk_peak_equity / risk_start_equity (halt cruzado)
+================================================================================
+ARQUIVOS: main.py:68-108 (_build_risk_manager) ; main.py:111-150 (_build_beta_guard) ;
+          risk/portfolio_guard.py:41-58 ; planner.py:121 ; main.py:177
+
+O guard das acoes e o guard do beta sao instancias SEPARADAS, mas LEEM/ESCREVEM
+as MESMAS chaves de estado e atualizam com o MESMO equity total da conta:
+  - risk_start_equity:{today}: lido por ambos (main.py:80 e :125). O 1o a montar
+    fixa o valor; o 2o reusa. OK (e o equity total do dia).
+  - risk_peak_equity (GLOBAL): ambos leem (main.py:90/131), ambos escrevem via
+    on_peak_update (main.py:102/143) e via update(). E o high-water do equity
+    TOTAL (acoes + beta no MESMO Alpaca).
+  - Ambos chamam update(equity_total): acoes em begin_cycle (planner.py:121),
+    beta em _BetaRebalanceOrchestrator.run_cycle (main.py:177) e no boot (main.py:145).
+
+CONSEQUENCIA (nao e bug de corrupcao de dado — o pico sobe consistente — mas e
+acoplamento de risco real):
+  - drawdown e medido sobre o equity COMBINADO. Um tombo causado MAJORITARIAMENTE
+    pelo book de ACOES conta contra o orcamento de DD do BETA (-28%) e vice-versa.
+    Os books NAO sao isolados: dividem um unico envelope de risco.
+  - Cenarios:
+    * acoes despencam e arrastam o equity total -28% -> o beta_guard halta o
+      REBALANCE do beta (bloqueia compras), mesmo que o book do beta esteja saudavel.
+    * beta sangra e puxa o total -20% -> o stock_guard halta NOVAS compras de
+      acoes. (Saidas/protecoes sempre passam — risco controlado, mas e cross-halt.)
+  - No paper "so o beta operando" (watchlist AAPL/MSFT so agem se houver
+    posicao/gatilho), o efeito pratico hoje e pequeno. Mas e LATENTE e contamina a
+    interpretacao do track record (um halt do beta pode ter origem nas acoes).
+
+SUBPONTO (boot): _build_beta_guard chama guard.update(equity) no boot (main.py:145)
+para engajar halt se ja estourou — correto como fail-safe. Mas se o pico global
+estiver inflado por um pico ANTIGO das acoes, o beta pode nascer "mais perto do
+halt" do que o proprio historico do beta justificaria.
+
+CORRECAO EXATA (decisao de produto + cirurgia):
+  - Se a INTENCAO e books independentes (recomendado p/ um track record limpo do
+    beta): dar ao beta_guard chaves PROPRIAS de estado e medir DD sobre o
+    SUB-equity do beta (valor de mercado das posicoes do universo do beta + caixa
+    atribuido), nao sobre o equity total. Concretamente: peak/start keys
+    "beta:risk_peak_equity" / "beta:risk_start_equity:{today}" e alimentar
+    beta_guard.update() com o equity do SLEEVE do beta (somar mv das posicoes do
+    universo). Isso isola o halt do beta do ruido das acoes.
+  - Se a intencao e UM envelope unico (os dois books compartilham risco de
+    proposito): documentar explicitamente e calibrar os limites pensando no
+    COMBINADO (o -28% do beta passa a ser "halt do beta quando a CONTA cai 28%",
+    nao "quando o beta cai 28%"). Como esta, o comportamento e ambiguo.
+  Em paper-only com so o beta vivo, isto e MEDIO; se as acoes tambem operarem, e ALTO.
+
+================================================================================
+[MF-5] MEDIO — Execucao a mercado intraday vs pesos de FECHAMENTO (NAV diverge da paridade)
+================================================================================
+ARQUIVOS: beta_rebalancer.py:355-363 (OrderType.MARKET) ; beta_live via Monitor
+          (interval 10 min, main.py:51) ; vs backtest que assume preco de fechamento.
+
+O backtest calcula retorno e turnover a preco de FECHAMENTO. O vivo:
+  - dispara o rebalance no PRIMEIRO tick do Monitor em que o mes e devido. O
+    Monitor roda a cada 10 min durante o pregao (main.py:51, monitor.py). Logo a
+    ordem a mercado enche a um preco INTRADAY arbitrario (sabe-se la qual tick),
+    nao no fechamento que define os pesos do backtest.
+  - As ordens sao MARKET (beta_rebalancer.py:360) com TIF=DAY. Slippage +
+    horario de fill != close -> o NAV realizado diverge da paridade teorica. Em
+    baixa frequencia (mensal) o efeito e 2a ordem, mas soma no track record.
+
+CORRECAO EXATA:
+  - Disparar o rebalance perto do fechamento (ex.: um job dedicado ~15 min antes
+    do close, analogo ao schedule_eod_capture, em vez de "no 1o tick do dia"),
+    ou usar MarketOnClose/LimitOnClose se o objetivo e replicar o close. Para
+    paper, no minimo DOCUMENTAR que o fill e intraday e que a paridade de NAV tem
+    um erro de execucao esperado; idealmente mover o gatilho p/ perto do close.
+  - Combina bem com a correcao de MF-2 (rebalancear em r+1, perto do close de r+1).
+
+--------------------------------------------------------------------------------
+O QUE ESTA CORRETO (verificado, nao so lido)
+--------------------------------------------------------------------------------
+[OK] PARIDADE vivo == backtest: BIT-A-BIT. Reproduzi independentemente sobre o
+     cache real (8401 dias): maxdiff(target_weights_for_date(d) vs
+     production_weight_frame(panel).loc[d]) = 0.0 em 43 datas amostradas (nao so
+     as 4 do teste). beta_rebalancer.py:107-155.
+[OK] SEM LOOK-AHEAD (na FUNCAO de peso): perturbar a barra do PROPRIO asof nao
+     muda o alvo (maxdiff 0.0); perturbar o dado que a decisao legitimamente usa
+     (o fechamento do ultimo rebalance) muda (0.76). O corte panel.index<=asof +
+     o .shift(1) herdado garantem que a linha asof so reflete dados<=asof-1.
+     (Isto valida a corretude do .shift(1); MF-2 e sobre o DIA DO GATILHO, nao
+     sobre look-ahead.)
+[OK] FLAG OFF e inerte: run_beta_rebalance_cycle retorna {enabled:False} sem
+     tocar broker (beta_live.py:84-86); schedule_eod_capture retorna False
+     (beta_live.py:141-143); build_app so monta beta_guard/_BetaRebalanceOrchestrator/
+     on_schedule_start dentro de `if beta_live_enabled()` (main.py:294-312); o
+     import de beta_live nao baixa dados nem toca o broker. Teste
+     test_live_runner_is_noop_when_flag_off confirma. (CAVEAT: o conflito MF-1 e
+     do sistema-base e NAO depende da flag — existe mesmo com a flag off, mas so
+     se manifesta quando ha posicoes do beta, que so existem com a flag on.)
+[OK] BANDA DE NAO-TRADE (1.5%), diff orders (lado/qty), mapeamento BTC-USD->BTC/USD
+     no caminho de ORDEM, gatilho 1x/mes idempotente, kill switch via Executor,
+     guard halt bloqueia compras e libera vendas, teto por simbolo: todos cobertos
+     por testes (19/19 verdes) e revisados. beta_rebalancer.py:312-363, 172-191.
+[OK] GUARD calibrado (numeros sao defensaveis): DD-halt -28% com folga sobre o
+     MaxDD esperado -19.7% do L=1.5x (config/risk.py:96-104 + beta_v2 verdict);
+     daily -6% (~6-7 desvios p/ um produto ~15% a.a.); per-symbol 60% acomoda o
+     sleeve de bonds no book alavancado. A CALIBRACAO esta sa; o problema e a
+     INTERACAO (MF-4), nao os niveis.
+[OK] gatilho sobrevive a restart sem re-rebalancear: mark_rebalanced so e chamado
+     APOS a execucao (beta_live.py:118); plan_if_due NAO marca (beta_rebalancer.py:366-382),
+     entao um crash antes de executar deixa o mes ainda devido. Estado persistido
+     em StateRepository (mes 'YYYY-MM'). Correto.
+[OK] Integridade do track record: nav_history e append-only por dia + cadeia de
+     hash + ImmutableHistoryError em backfill; capture_eod idempotente por dia
+     (UPSERT). reporting/nav_repo.py, capture.py, verify_chain.py. Solido.
+     (Ressalva: o EOD captura o equity da CONTA inteira — se as acoes operarem
+     junto, a serie mistura os dois books; ver MF-4. E o cron 21:20 UTC cobre o
+     close o ano todo, mas captura ANTES de eventual after-hours; aceitavel p/ EOD.)
+
+--------------------------------------------------------------------------------
+RESUMO EXECUTIVO
+--------------------------------------------------------------------------------
+NAO LIGAR ainda. Antes do go-live em paper:
+  1. [MF-1 CRITICO] Isentar o universo do beta do TrailingStopStrategy
+     (trailing_stop.py:46-68 + main.py:243). Sem isso o sistema-base liquida o
+     book do beta numa queda de 10% e o track record mede outro produto.
+  2. [MF-2 ALTO] Corrigir o lag do gatilho mensal: rebalancear em r+1 (2o pregao
+     do mes), igual ao backtest, senao o NAV do paper carrega o alvo do mes
+     anterior todo mes (gap ~10% do gross). beta_rebalancer.py:172-185 / beta_live.py.
+  3. [MF-3 ALTO/latente] Antes de permitir peso de cripto > 0: rotear cripto em
+     get_last_price/get_bars (alpaca_broker.py:85-108), normalizar o simbolo da
+     posicao (BTCUSD vs BTC/USD) e forcar TIF=GTC. Ate la, fail-closed se algum
+     alvo de cripto != 0.
+  4. [MF-4 MEDIO/ALTO] Decidir e implementar isolamento (ou documentar a uniao)
+     do envelope de risco entre o book de acoes e o do beta (chaves de estado e
+     equity-base compartilhados). main.py:68-150.
+  5. [MF-5 MEDIO] Executar o rebalance perto do FECHAMENTO (nao no 1o tick
+     intraday) para o NAV aderir a paridade. beta_rebalancer.py:360 + agendamento.
+
+MF-1 e MF-2 sao os imperdoaveis: o primeiro destroi a tese, o segundo destroi a
+fidelidade do track record. Com MF-1 e MF-2 corrigidos e MF-3 travado em
+fail-closed (cripto=0), e DEFENSAVEL ligar em paper para comecar a gravar o
+baseline — com MF-4/MF-5 endercados em seguida. Como esta hoje: NAO LIGAR.
+================================================================================

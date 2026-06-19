@@ -1,0 +1,227 @@
+====================================================================================================
+AUDITORIA ADVERSARIAL DE CODIGO — "O CODER" (read-only, independente)
+ALVO: 3 tribunais de cripto cujos vereditos embasaram o pivo estrategico
+Data: 2026-06-15  |  Repo: /Users/muriloferrari/Projetos/trading-automation
+====================================================================================================
+
+MANDATO: tentar DERRUBAR os vereditos. O risco mais grave e um FALHA FALSO (matar um edge
+que existia e abandonar cripto sem motivo). Default = ceticismo. Rodei tudo o que pude.
+
+----------------------------------------------------------------------------------------------------
+RESUMO EXECUTIVO (3 vereditos de confianca)
+----------------------------------------------------------------------------------------------------
+  simulation/crypto_intraday.py  (momentum, FALHA)            -> VEREDITO CONFIAVEL
+  simulation/crypto_liqfade.py   (fading liquidacao, FALHA)   -> VEREDITO CONFIAVEL
+  simulation/crypto_carry.py     (carry, EDGE INSUFICIENTE)   -> VEREDITO CONFIAVEL (com 1 ressalva media)
+
+  Os 3 reproduzem BYTE-IDENTICOS ao .txt commitado (rodei os 3 com a rede/cache atual).
+  Achei bugs/imprecisoes (listados abaixo), mas TODOS empurram na direcao conservadora para um
+  FALHA (inflariam um PASS, nao um FALHA). Nenhum inverte a direcao do veredito. Tentei
+  especificamente ressuscitar o melhor candidato (liqfade z=6, unico com net>0) e ele morre
+  out-of-sample e a custo realista. Cripto-de-preco foi corretamente arquivado.
+
+----------------------------------------------------------------------------------------------------
+REPRODUTIBILIDADE (dim. 6) — CONFIRMADA
+----------------------------------------------------------------------------------------------------
+  Ambiente: `uv run python` OK (numpy/pandas presentes). Cache COMPLETO:
+    - data/binance_1m/: 6 simbolos x 12 meses; BTC perp = 525.600 barras = EXATAMENTE 12 meses de
+      1min, SEM gaps (100% das deltas = 1min), SEM NaN, contiguo. 6 x 525.600 = 3.153.600 (bate o header).
+    - data/binance_carry/funding/: 4 simbolos x 12 = 1095 settlements/moeda (3x365, bate). spot/: idem.
+  Diffs (verdict commitado vs re-rodado):
+    - crypto_intraday : TABELA IDENTICA
+    - crypto_carry    : ARQUIVO IDENTICO (diff vazio)
+    - crypto_liqfade  : ARQUIVO IDENTICO (diff vazio)
+  >> Os numeros do verdict.txt se regeneram. Nada inventado.
+
+  NOTA importante p/ look-ahead: como a serie 1min e perfeitamente contigua (sem minuto faltando),
+  a aritmetica de indice inteiro (t+1, t+1+hold) mapeia limpo para "proximo minuto"/"hold min
+  depois". Nao ha buraco que desalinhe entrada/saida.
+
+====================================================================================================
+TRIBUNAL 1 — simulation/crypto_intraday.py (MOMENTUM CURTO) — VEREDITO CONFIAVEL
+====================================================================================================
+
+LOOK-AHEAD / LEAKAGE (dim.1) — LIMPO.
+  - Sinal no CLOSE de t: r1[t]=log(c[t]/c[t-1]) (crypto_intraday.py:221), mom_k=rolling(k).sum
+    (l.222), vol_1m=rolling(VOL_WINDOW).std (l.224). Verifiquei que pandas .rolling e TRAILING
+    (default): no idx t usa [t-k+1..t] / [t-59..t]. Tudo <= close[t]. z[t] (l.227) idem.
+  - Entrada o[t+1] (l.244), saida o[t+1+hold] (l.245). Estritamente FUTURO do sinal. Gap = 1 barra.
+  - z-score normalizado por VOL ROLANTE, NAO por estatistica de TODA a amostra. A armadilha
+    classica (z-score com std do dataset inteiro) foi EVITADA. Sem vazamento.
+  - 1a barra valida t=VOL_WINDOW+k (l.237): todas as janelas cheias (sem NaN parcial). Correto.
+
+CUSTO (dim.2) — CORRETO.
+  - taker_rt = 2*4 = 8 bps RT; maker_rt = 2*2 = 4 bps RT (l.233-234). UM round-trip por trade
+    (entrada+saida). Nao pela metade nem em dobro. Net = g - taker_rt - fund (l.255). OK.
+  - Funding (l.250-253): modelado como CUSTO ABSOLUTO sempre subtraido. Para SHORT com funding>0
+    o short RECEBERIA — logo modelar como custo e CONSERVADOR (penaliza shorts). Magnitude
+    desprezivel: hold 5-15min cruza settlement com prob ~3% -> ~0.03 bps/trade. Nao esconde edge.
+
+ESTATISTICA (dim.3) — HONESTA.
+  - n_trials = 4k x 3z x 3H = 36, conta TODA a grade (run_tribunal l.350). VOL_WINDOW e fixo
+    (nao varrido) -> corretamente fora do n_trials. Sem param varrido-e-escondido.
+  - benchmark buy&hold: mesmo df, mesmo periodo/universo (l.357-364). Sharpe bh=0.74. Justo.
+  - PBO=0.00: NAO e red flag. Validei o estimador: ruido puro -> PBO~0.58, 36 perdedores
+    homogeneos -> PBO baixo (nada esta "ajustado" porque nada funciona). Plausivel.
+
+DIRECAO / FALHA FALSA (dim.5) — testei o pior cenario.
+  - O gross do momentum e ~ -0.29 bps/trade (cripto REVERTE no curto prazo, nao segue). Inverti o
+    sinal: reversao da +0.29 bps gross. Isso NAO e bug — e o achado, e o proprio codigo/docstring
+    do H2 ja reconhece. +0.29 bps gross NAO paga 8 bps RT. Sharpe BRUTO ja e negativo (-1.09) ->
+    a anualizacao/escala nao importa: negativo continua negativo. FALHA robusta.
+
+AMOSTRA (dim.4) — vies CONSERVADOR (favorece FALHA).
+  - Pooling de 6 moedas como iid, mas as 1min rets sao MUITO correlacionadas (0.57-0.78, matriz
+    medida). n efetivo < n reportado -> DSR/PSR SUPERestimam significancia -> vies para PASS. Como
+    deu FALHA mesmo assim, corrigir tornaria o FALHA AINDA mais forte.
+
+VEREDITO: CONFIAVEL. Momentum curto direcional realmente nao sobrevive ao custo. Robusto a
+direcao, anualizacao, dependencia entre simbolos e custo.
+
+====================================================================================================
+TRIBUNAL 2 — simulation/crypto_liqfade.py (FADING DE LIQUIDACAO) — VEREDITO CONFIAVEL
+====================================================================================================
+(este foi o mais perigoso: e o UNICO com config de net taker POSITIVO. Bati forte.)
+
+LOOK-AHEAD (dim.1) — LIMPO. Mesma mecanica causal do H1: sinal no close de t (crypto_liqfade.py
+  l.138-143), filtro de volume vspike[t] com media rolante trailing (l.147), entrada o[t+1] (l.172),
+  saida o[t+1+hold] (l.173). 1a barra t=max(VOL_WINDOW,VOLUME_WINDOW)+w (l.161): janelas cheias.
+  FADE = side = -sign(z) (l.171): compra apos queda extrema, short apos disparo. Direcao correta.
+
+CUSTO (dim.2) — CORRETO (identico ao H1: 8 bps RT taker, 4 bps maker; funding conservador).
+
+O ACHADO CENTRAL (a unica config que "quase passa"):
+  w=1 z=6 H=10 vol=F (pooled): gross +14.16 bps, NET TAKER +5.24 bps (POSITIVO), win 53%.
+  Ela FALHA SO no gate estatistico: DSR_T = 0.083 (< 0.95). Logo o FALHA dela depende 100% do DSR.
+  Eu ataquei o DSR por TRES angulos independentes:
+
+  (A) DSR usa o proxy de variancia de Lo(2002) (statistics.py:176) porque NENHUM tribunal passa
+      `trial_sharpes`. Recalculei com a variancia REAL dos 54 Sharpes das trials (o metodo que a
+      propria docstring de evaluate_edge chama de "ideal"): o obstaculo sr0 SOBE (0.165 vs 0.090
+      do proxy) e o DSR dessa config DESPENCA de 0.083 para 0.0005. ZERO das 54 configs passam.
+      => O proxy atual e, se algo, GENEROSO; o metodo justo reprova com mais folga. [achado: BAIXO]
+
+  (B) Anualizacao da Sharpe: observed_sharpe(nt, periods=MIN_ANO/hold) trata cada trade como 1
+      periodo de `hold` min e assume ano cheio de trades back-to-back. Mas z=6 da so 614 trades/ano,
+      nao 52.560. Isso INFLA a Sharpe anual ~9.25x (8.27 vira ~0.89 se anualizada pela contagem
+      real de trades). POReM: isso so torna o gate "Sharpe>=1.0" MAIS FACIL de passar, e o DSR (que
+      e ~invariante de escala, e uma razao) reprova mesmo assim. So poderia causar PASS FALSO, nunca
+      FALHA FALSA. [achado: MEDIO em rigor, mas direcao = conservadora p/ FALHA]
+
+  (C) ROBUSTEZ OOS + custo realista (o teste decisivo de FALHA FALSA): parti os 12 meses 50/50
+      por simbolo nessa config: TREINO +7.74 bps net / TESTE +1.70 bps net -> o edge cai 78% out
+      -of-sample, win% mal passa de 50%. E o gross +14 bps so cobre custo ate ~13 bps RT; numa
+      cascata de liquidacao real o slippage taker e MUITO pior que 8 bps (a propria RESSALVA do
+      arquivo alerta p/ adverse selection no fill). Ou seja: mesmo o melhor candidato e fragil OOS
+      e some a custo honesto. MATAR ISSO NAO E FALHA FALSA.
+
+ESTATISTICA (dim.3) — HONESTA, com 1 nota.
+  - n_trials = 3w x 3z x 3H x 2[vol] = 54 (n_trials_total l.243), conta toda a grade.
+  - NOTA [baixo]: em z=6 o filtro de volume e NAO-VINCULANTE (toda barra extrema ja tem pico de
+    volume) -> as linhas vol=sim e vol=nao em z=6 sao IDENTICAS (614/614, mesmos numeros no .txt).
+    Logo ~18 das 54 trials sao duplicatas; o n_trials EFETIVO e menor, o que torna o obstaculo DSR
+    levemente ALTO demais -> conservador p/ FALHA. Diagnostico-chave "edge cresce com z" e real
+    (medi: gross +0.79 -> +2.26 -> +8.05 bps), mas crescer no extremo nao basta p/ cobrir custo+OOS.
+  - PBO=0.09 com 54 configs x 57 trades: o m=57 vem da config de MENOR n (z=6,w=5). PBO baixo OK.
+
+AMOSTRA (dim.4) — mesmo vies conservador do H1 (correlacao cross-symbol alta infla significancia
+  -> favorece PASS -> o FALHA fica mais forte se corrigido). Alem disso n minusculo nas caudas
+  (57-614 trades) ja e penalizado corretamente pelo DSR via tamanho de amostra.
+
+VEREDITO: CONFIAVEL. A reversao pos-dislocacao existe no bruto e cresce no extremo, mas (i) reprova
+o gate estatistico por 3 metodos, (ii) nao e estavel OOS, (iii) some a custo realista de cascata.
+Arquivar foi correto.
+
+====================================================================================================
+TRIBUNAL 3 — simulation/crypto_carry.py (CARRY DELTA-NEUTRO) — VEREDITO CONFIAVEL (1 ressalva media)
+====================================================================================================
+
+LOOK-AHEAD (dim.1) — LIMPO no caminho do veredito (delta-neutro).
+  - Funding alinhado a janela do perp (compute_carry l.339). Sinal de funding correto: media
+    +0.63 bps/8h, 13.3% negativos (bate o .txt). Settlements em 00/08/16 UTC (verifiquei).
+  - Basis amostrado nos instantes de funding por reindex+FFILL (l.374-377): ffill = ultimo basis
+    conhecido <= instante. CAUSAL. Confirmei num toy: nao puxa basis futuro.
+  - Sinal do MtM do basis (l.392): per_settle = rates - d_basis - custo. PnL_hedge = -d_basis.
+    Economicamente correto (long spot + short perp ganha quando o basis cai/perp converge). Conferi.
+
+  ACHADO [BAIXO] — look-ahead REAL porem inofensivo, e SO na variante de contraste:
+    short_only usa perp.interpolate() (l.409), que e interpolacao LINEAR (usa a barra SEGUINTE).
+    ~21% dos instantes de funding tem offset de ms (ex. 16:00:00.001) que nao cai num minuto exato
+    -> interpola com o futuro. MAS: (i) isso e SO na variante so-short-perp, mostrada p/ CONTRASTE,
+    NAO no delta-neutro do veredito; (ii) o delta-neutro usa .ffill() (causal), nao interpolate;
+    (iii) a so-short ja da retorno fortemente NEGATIVO. Nao afeta o veredito. (bfill em l.378/412 so
+    toca NaN inicial = 1 ponto na entrada; marginal.)
+
+CUSTO (dim.2) — CORRETO. entry_cost_frac = 4 cruzamentos x 4 bps = 16 bps RT da posicao inteira
+  (spot in/out + perp in/out), amortizado /n settlements (l.387, 392). Maker/taker coerente (taker).
+
+ESTATISTICA (dim.3) — o carry NAO usa DSR (e premio estrutural, nao sinal direcional), mede retorno
+  anual liquido vs buy&hold + Sharpe + leverage + DD. Defensavel para a tese.
+  - Sharpe_liq agregado = 8.00 e ALTISSIMO, mas eu chequei: e dominado por o funding ser
+    EXTREMAMENTE suave (rates-only Sharpe ~31; vol do funding ~0.65 bps). O d_basis adiciona a vol
+    real (std ~1.6 bps). Sharpe possivelmente OTIMISTA (basis amostrado so 3x/dia perde vol intra),
+    MAS Sharpe alto so empurra para PASS — e o carry FALHOU mesmo assim. Conservador p/ o veredito.
+
+RESSALVA [MEDIO] — UMA das duas razoes do FALHA e fraca (mas o veredito se sustenta pela outra):
+  O criterio de leverage usa target_ann = max(media_bh, 0.10) e cai no PISO de 10% (l.755). Com
+  carry 4.73% -> precisa 2.11x -> reprova "> 2x". Mas o benchmark ECONOMICO do proprio relatorio e
+  o buy&hold (6.77%); para igualar 6.77% bastam 1.43x (< 2x) -> esse criterio PASSARIA se ancorado
+  no bh real em vez do piso 10%. Ou seja: a razao "so interessante acima de 2.1x" e meio arbitraria
+  (dirigida pelo piso, nao pelo bh).
+  POReM o carry TAMBEM reprova no criterio INDEPENDENTE "net (4.73%) < buy&hold (6.77%)" (l.647,672)
+  — e isso vale com ou sem alavancagem, e ate excluindo a pior moeda (BNB, funding negativo) o
+  melhor caso de 3 moedas da 6.51% < 6.77%. Logo o VEREDITO (edge insuficiente) SE MANTEM; apenas
+  uma das duas justificativas listadas e fragil. Recomendacao: ancorar o teto de leverage no bh, nao
+  no piso de 10%, p/ a justificativa ficar honesta. NAO inverte o veredito.
+
+  ACHADO [BAIXO] — inconsistencia: dn_net_ann (7.04%) > dn_gross_ann (6.97%) p/ BTC (net MAIOR que
+  bruto, anti-intuitivo). Causa: gross usa funding_sum+basis_pnl (simples) e net usa cumprod de
+  (rates-d_basis-custo) (composto); diferem por composicao + tratamento do basis. Magnitude ~0.07%/ano.
+  Imaterial, mas e um sinal de que os dois numeros nao sao estritamente o mesmo PnL bruto vs liquido.
+
+AMOSTRA (dim.4): 1095 settlements/moeda, 4 moedas. Agregado e media simples das Sharpes (l.512) —
+  a propria nota do codigo admite que nao alinha timestamps (proxy). Aceitavel; nao muda o veredito.
+
+VEREDITO: CONFIAVEL. O carry e estruturalmente magro (4.73%/ano liq a 1x), nao bate buy&hold, e o
+risco dominante (contraparte/de-peg/margem) nem esta no backtest — a RESSALVA esta correta e honesta.
+Unica acao sugerida: corrigir a ancora do teste de leverage (cosmetico p/ a justificativa).
+
+====================================================================================================
+BONUS — risk/crypto_sleeve.py + tests/test_crypto_sleeve.py
+====================================================================================================
+  Nao e tribunal (nao embasa veredito) — e a parede de risco SE algo de cripto fosse ao ar.
+  Codigo solido: capital ISOLADO (parede de fogo vs Sistema 1), teto de leverage RIGIDO com dupla
+  trava (config clampa + re-aplica, l.73-75), kills independentes (daily/drawdown), ordem fail-safe
+  de bloqueios (kill global -> halt -> posicoes -> inputs -> exposicao -> leverage). Reusa o
+  KillSwitch global em vez de recriar. tests/test_crypto_sleeve.py: 15/15 PASSAM. Sem achados.
+
+====================================================================================================
+TABELA DE ACHADOS (severidade | afeta direcao do veredito?)
+====================================================================================================
+  #  modulo            achado                                                  sev    inverte?
+  1  liqfade/statistics DSR via proxy de var (nao trial_sharpes reais); o      BAIXO  NAO (metodo
+                        metodo justo reprova com MAIS folga (0.083->0.0005)            justo reforca FALHA)
+  2  liqfade/intraday  Sharpe anual inflada ~9x p/ estrategias esparsas        MEDIO  NAO (so causaria
+                        (anualiza como se trades fossem back-to-back)                  PASS falso; deu FALHA)
+  3  liqfade           z=6: filtro de volume nao-vinculante -> ~18/54 trials   BAIXO  NAO (n_trials efetivo
+                        sao duplicatas (n_trials efetivo < 54)                        menor = conservador)
+  4  carry             teste de leverage ancorado no piso 10%, nao no bh real  MEDIO  NAO (veredito se
+                        (2.1x>2 vs 1.43x<2) -> 1 das 2 razoes do FALHA e fraca         sustenta pelo outro
+                                                                                      criterio: net<bh)
+  5  carry             so-short usa interpolate() (look-ahead em ~21% de        BAIXO  NAO (so na variante
+                        instantes ms-offset)                                          de contraste)
+  6  carry             dn_net > dn_gross p/ BTC (composto vs simples + basis)  BAIXO  NAO (imaterial, ~0.07%)
+  7  intraday/liqfade  pooling de 6 moedas correlacionadas (0.57-0.78) como    MEDIO  NAO (infla
+                        iid -> n efetivo < n -> DSR/PSR superestimam            (rigor) significancia =
+                        significancia                                                 conservador p/ FALHA)
+
+  >> NENHUM achado e CRITICO. NENHUM inverte a direcao de um veredito. Todos os vieses materiais
+     empurram para PASS (conservadores para um FALHA). O risco que o mandato mais temia — FALHA
+     FALSA, matar um edge real — foi testado de frente no melhor candidato (liqfade z=6) e refutado
+     por OOS (edge cai 78%) + custo de cascata realista.
+
+CONCLUSAO: os 3 vereditos que embasaram o pivo sao CONFIAVEIS. Cripto-de-preco (momentum/fade)
+foi arquivado por motivo real (custo + reversao fraca + nao-robustez OOS). Carry foi corretamente
+julgado insuficiente (magro a 1x, nao bate bh, risco dominante fora do backtest). A unica correcao
+substantiva recomendada e cosmetica de justificativa (ancora do teste de leverage do carry).
+====================================================================================================

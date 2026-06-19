@@ -1,0 +1,122 @@
+================================================================================================
+BETA v2 — ESTRATEGIA DE PRODUCAO: vol-target confirmado + hedge condicional + fronteira
+de alavancagem. Pergunta: o produto e ATRAENTE (domina o beta cru) ou so DEFENSIVO?
+================================================================================================
+================================================================================================
+VEREDITO (ESTRATEGIA DE PRODUCAO)
+================================================================================================
+(a) HEDGE DE CRASH CONDICIONAL (bear sustentado) — AJUDA?
+    vol-target 1x       : Sharpe 1.19 | MaxDD -13.5% | pior ano -10.0% (2022) | CAGR +6.9%
+    vol-target + hedge  : Sharpe 1.13 | MaxDD -12.9% | pior ano -11.1% (2022) | CAGR +7.8%
+    -> NAO AJUDA o suficiente: derruba o Sharpe sem cortar o tombo de forma material
+       (o vol-target via 1/vol ja faz a maior parte do de-risk). NAO incluir.
+
+(b) FRONTEIRA DE ALAVANCAGEM — existe L que RECUPERA o retorno do beta (~16%)
+    MANTENDO o MaxDD ABAIXO de -38.8%?  (financiamento 5.5% a.a. sobre o emprestado)
+    · MaxDD passa a ser PIOR que -38.8% a partir de L ~= 3.1x.
+    · CAGR so IGUALA/SUPERA o beta (+16%) a partir de L ~= 4.5x.
+
+    -> NAO: para chegar ao retorno do beta (~16%) e preciso alavancar TANTO que o
+       tombo ja estourou -38.8% antes disso (DD estoura em ~3.1x; retorno so bate
+       em ~4.5x). O custo de financiamento + o CAGR-base modesto impedem a
+       dominacao. No tombo IGUAL ao do beta (~L=3x), o vol-target entrega MENOS
+       retorno absoluto. PRODUTO = DEFENSIVO (risco-ajustado melhor, retorno menor).
+
+================================================================================================
+(c) ESTRATEGIA DE PRODUCAO RECOMENDADA
+================================================================================================
+  CLASSIFICACAO DO PRODUTO: DEFENSIVO (risco-ajustado melhor, retorno absoluto menor).
+
+  RECEITA DE PRODUCAO:
+    1. NUCLEO: VOL-TARGET (peso ~1/vol por ativo, escala p/ vol-alvo 10% a.a.,
+       teto de cripto, gross<=1) — o unico lever que passou a barra honesta
+       (Sharpe 1.19 vs beta 0.97; MaxDD -13.5% vs -38.8%).
+    2. HEDGE DE CRASH CONDICIONAL: OPCIONAL/NAO-CRITICO (o de-risk via 1/vol ja
+       cobre a maior parte; o gatilho sustentado evita o whipsaw mas move pouco a
+       agulha). Manter como camada de seguranca de cauda, nao como gerador de alpha.
+
+    3. ALAVANCAGEM: nivel de producao sugerido L = 1.5x (CAGR +9.4%,
+       Sharpe 1.08, MaxDD -19.7%). NAO alavancar ate ~16% de
+       retorno: isso exigiria L>~3x, estourando o tombo do beta e matando o Sharpe.
+       O produto se vende como 'retorno de ~1 digito alto / 2 digitos baixo com
+       metade do drawdown e Sharpe ~1.1-1.2', NAO como 'bate o mercado'.
+
+  POSICIONAMENTO HONESTO: este e um produto DEFENSIVO de qualidade institucional
+  (drawdown contido, Sharpe alto, track record limpo) — rampa p/ AUM. NAO e um
+  produto que domina o buy&hold em retorno absoluto liquido de financiamento.
+
+  *** PRECISA DE AUDITORIA DO CODER ANTES DE DINHEIRO REAL. ***
+
+================================================================================================
+PREMISSAS / HONESTIDADE
+================================================================================================
+  NUCLEO (importado, NAO editado, de simulation.beta_portfolio): vol-target puro (peso ~1/vol por ativo,
+  SEM o portao de regime/SMA do modulo auditado) · vol-alvo 10% a.a. · lookback vol 60d · teto cripto 5%/nome ·
+  rebalance mensal · gross<=1 (base, antes da alavancagem).
+  HEDGE CONDICIONAL (PADRAO): bear SUSTENTADO = preco<SMA200 por 20 dias CONSECUTIVOS
+  OU drawdown do ativo > 20% do pico. (vs portao auditado, que disparava a cada cruzamento -> whipsaw.)
+  ALAVANCAGEM: escala o vetor de pesos por L; financiamento 5.5% a.a. (~rf medio + spread de margem)
+  cobrado DIARIAMENTE so sobre o capital emprestado max(gross-1,0). Custo de transacao real mantido.
+  SEM LOOK-AHEAD: peso de t decidido com dado <= t-1 (.shift(1) herdado); retorno em t; juro sobre o
+  gross ja decidido em t-1. Custo de equities 3bps/lado, cripto 35bps/lado.
+
+  PAINEL: 8 ativos, 1993-01-29..2026-06-15 (8401 dias). JANELA-CABECA a partir de 2004-11-18 (cesta diversificada).
+  SPY:1993-01-29→2026-06-15(8401)  QQQ:1999-03-10→2026-06-15(6859)  TLT:2002-07-30→2026-06-15(6008)  IEF:2002-07-30→2026-06-15(6008)  GLD:2004-11-18→2026-06-15(5426)  SLV:2006-04-28→2026-06-15(5064)  BTC-USD:2014-09-17→2026-06-15(2953)  ETH-USD:2017-11-09→2026-06-15(2159)
+
+================================================================================================
+(1) NUCLEO: VOL-TARGET 1x (confirmado) vs BUY&HOLD (beta cru) vs +HEDGE CONDICIONAL
+================================================================================================
+  estrategia                     |    CAGR | Sharpe | Sortino |   MaxDD | Calmar |       pior ano | gross
+  -------------------------------------------------------------------------------------------------------
+  VOL-TARGET 1x (confirmado)     |   +6.9% |   1.19 |    1.67 |  -13.5% |   0.51 |   -10.0% (2022) |   74%
+  VOL-TARGET + hedge condicional |   +7.8% |   1.13 |    1.52 |  -12.9% |   0.60 |   -11.1% (2022) |   83%
+  BUY&HOLD eq-weight (beta cru)  |  +16.0% |   0.97 |    1.25 |  -38.8% |   0.41 |   -29.3% (2022) |  100%
+
+================================================================================================
+(2) FRONTEIRA DE ALAVANCAGEM (vol-target 1x alavancado, COM financiamento real)
+    Pergunta decisiva: existe L que recupera o retorno do beta (~16%) com tombo < -38.8%?
+================================================================================================
+  alavanca |    CAGR | Sharpe |    MaxDD | gross med | recupera ret beta? |  tombo<beta(-38.8%)?
+  ----------------------------------------------------------------------------------------------
+      1.0x |   +6.9% |   1.19 |   -13.5% |       74% |                nao |                  SIM
+      1.3x |   +8.5% |   1.13 |   -17.2% |       97% |                nao |                  SIM
+      1.5x |   +9.4% |   1.08 |   -19.7% |      112% |                nao |                  SIM
+      2.0x |  +10.9% |   0.95 |   -25.9% |      149% |                nao |                  SIM
+
+  Referencia: BUY&HOLD beta cru CAGR +16.0% / Sharpe 0.97 / MaxDD -38.8%.
+  Referencia: VOL-TARGET 1x        CAGR +6.9% / Sharpe 1.19 / MaxDD -13.5%.
+
+  CROSSOVERS: tombo estoura -38.8% em ~L=3.1x; retorno so bate +16% em ~L=4.5x.
+  -> O TOMBO ESTOURA ANTES DO RETORNO BATER. Nao ha L que domine o beta. DEFENSIVO.
+
+================================================================================================
+(3) COMPORTAMENTO EM CRISE (retorno acumulado; historico INTEIRO; '-' fora do historico)
+================================================================================================
+  estrategia                 |     2008 (GFC) |   2020 (COVID) |    2022 (Bear)
+  -----------------------------------------------------------------------------
+  VOL-TARGET 1x              |          -0.3% |          +0.5% |         -10.0%
+  VOL-TARGET + hedge cond.   |          +7.6% |          +1.7% |         -11.1%
+  BUY&HOLD (beta cru)        |          -7.8% |          +5.5% |         -29.3%
+
+================================================================================================
+(4) SENSIBILIDADE (mostra que hedge-marginal e ausencia-de-L-atraente NAO sao overfit)
+================================================================================================
+  (i) HEDGE CONDICIONAL — varia confirmacao / limiar de drawdown:
+    variacao                 |    CAGR | Sharpe |   MaxDD |   pior ano
+    ------------------------------------------------------------------
+    PADRAO (20d / 20%dd)     |   +7.8% |   1.13 |  -12.9% |     -11.1%
+    confirm=10d              |   +7.8% |   1.09 |  -12.0% |      -7.3%
+    confirm=40d              |   +7.4% |   1.11 |  -16.8% |     -15.3%
+    dd=15%                   |   +8.3% |   1.16 |  -11.6% |      -8.7%
+    dd=30%                   |   +8.1% |   1.19 |  -13.2% |     -11.4%
+    so confirm (dd=99%)      |   +6.8% |   1.07 |  -14.5% |     -12.3%
+    so dd (confirm=9999)     |   +7.6% |   1.21 |  -15.9% |     -12.7%
+
+  (ii) FRONTEIRA — varia o custo de financiamento (a.a.) p/ os niveis-chave:
+    financiamento  |           L=1.0x |           L=1.3x |           L=1.5x |           L=2.0x
+    ------------------------------------------------------------------------------------------
+      4.0% a.a.    |       +6.9%/13dd |       +8.7%/17dd |       +9.6%/20dd |      +11.7%/26dd
+      5.5% a.a.    |       +6.9%/13dd |       +8.5%/17dd |       +9.4%/20dd |      +10.9%/26dd
+      7.0% a.a.    |       +6.9%/13dd |       +8.4%/17dd |       +9.1%/20dd |      +10.1%/26dd
+    (celula = CAGR / MaxDD. Mesmo com financiamento otimista de 4%, nenhum L
+     da grade recupera ~16% mantendo o tombo < -38.8% -> veredito robusto.)

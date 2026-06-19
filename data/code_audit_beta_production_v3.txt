@@ -1,0 +1,321 @@
+================================================================================
+RE-AUDITORIA ADVERSARIAL — CADEIA DE PRODUCAO DO BETA (PORTAO FINAL, RODADA 3)
+Auditor: O CODER (independente, read-only). Data: 2026-06-15.
+Pergunta central: agora e SEGURO ligar BETA_LIVE_ENABLED no paper p/ gravar o
+baseline (track record) que vai embasar AUM?
+Metodo: NAO confiei na prosa do Executor nem nos testes dele — REPRODUZI cada
+correcao com o cache REAL (data/beta_cache, 8401 barras ate 2026-06-15), o wiring
+REAL (_build_beta_guard, build_app, _BetaRebalanceOrchestrator) e o estado REAL em
+disco (data/trading.sqlite).
+================================================================================
+
+VEREDITO: ***AINDA NAO LIGAR.***
+
+NOVO-1 (boot-halt em conta flat) e NOVO-2 (sem feed vivo) FORAM corrigidos — eu
+reproduzi os dois e batem. O latente do MF-4 (isolamento de guard/keys) continua
+correto. POReM a correcao do NOVO-1/MF-4 (o conceito de "NAV do sleeve = capital
+alocado + P&L") INTRODUZIU UMA REGRESSAO NOVA e reproduzivel:
+
+  [NOVO-3 ALTO/BLOQUEADOR] DUPLA CONTAGEM de P&L no NAV do sleeve quando
+  BETA_SLEEVE_CAPITAL_PCT=1.0 (o DEFAULT, e o config de go-live documentado). O
+  guard e o sizing passam a ver ~2x o drawdown real do sleeve assim que o beta
+  tem posicoes com P&L. Consequencia: um drawdown NORMAL do produto (-15% real,
+  dentro do MaxDD esperado de -19.7%) e lido como -30% e DISPARA o halt de -28%.
+  Isto trunca o track record durante um pullback ordinario — a MESMA classe de
+  dano do NOVO-1, so que disparada por uma queda normal em vez de no boot.
+
+Ha ainda um BLOQUEADOR OPERACIONAL de estado em disco:
+
+  [NOVO-4 MEDIO/BLOQUEADOR-OPERACIONAL] Residuo PRE-FIX em data/trading.sqlite:
+  a chave 'beta:risk_start_equity:2026-06-15' ja esta gravada = '0' (lixo da
+  versao buggada do NOVO-1). No boot, _build_beta_guard le esse 0 (nao e None,
+  entao NAO sobrescreve), coage start_equity p/ 1 e o gate de PERDA DIARIA fica
+  NEUTRALIZADO no dia (denominador=1: uma perda de -10% intradia NAO dispara o
+  halt diario de -6%). Reproduzido contra o disco real. Tem de ser limpo antes
+  de ligar (ou o fix de NOVO-3 trata a raiz).
+
+LISTA DE BLOQUEADORES DESTA RODADA:
+  [NOVO-3 ALTO]   Dupla contagem de P&L no NAV do sleeve (default pct=1.0):
+                  guard/sizing veem 2x o DD; halt prematuro em drawdown normal.
+  [NOVO-4 MEDIO]  Residuo stale 'beta:risk_start_equity:<hoje>=0' em disco neutra-
+                  liza o gate de perda diaria no 1o dia. (Mesma raiz: tratar
+                  start_equity quando o valor persistido/derivado e <= 0.)
+
+CORRIGIDOS E VALIDADOS NESTA RODADA (reproduzidos por mim):
+  [NOVO-1 CRITICO -> CORRIGIDO] boot flat NAO nasce mais haltado; a 1a rebalanceada
+                  GERA ordens e o book e construido (nao vazio).
+  [NOVO-2 ALTO -> CORRIGIDO] existe job de refresh (force=True, mesma fonte), com
+                  fail-safe de rede que PRESERVA o cache, cadencia 11:00 UTC, e a
+                  PARIDADE peso (vivo==backtest) continua BIT-A-BIT sobre o painel.
+  [MF-4 latente -> OK no isolamento] guard com keys proprias; tombo das acoes nao
+                  halta o beta E tombo do beta halta o beta — QUANDO se usa
+                  BETA_SLEEVE_CAPITAL absoluto. (Com pct=1.0 + acoes juntas o
+                  isolamento vaza — e o mesmo defeito do NOVO-3.)
+
+CAMINHO P/ LIBERAR (defensavel ligar em paper) — pequeno e cirurgico:
+  1. Corrigir NOVO-3: resolve_sleeve_capital deve devolver o CAIXA ALOCADO FIXO
+     (nao pct*equity, que ja inclui P&L). Em paper so-beta, o NAV correto e
+     simplesmente broker.get_account().equity (sem somar P&L de novo). Reproduzi
+     que com BETA_SLEEVE_CAPITAL ABSOLUTO o NAV == equity exato (sem dupla
+     contagem) — entao o caminho mais seguro p/ go-live HOJE e FIXAR
+     BETA_SLEEVE_CAPITAL no caixa do paper (ex.: =100000) e NAO usar o pct=1.0.
+  2. Tratar start_equity<=0 (NOVO-4): se o valor persistido/derivado for <=0,
+     re-derivar do NAV do boot (e nao coagir p/ 1, que neutraliza o gate diario).
+     E limpar a chave stale no disco antes de ligar.
+  3. Adicionar testes que EXERCITEM pct=1.0 COM posicoes do beta carregando P&L
+     (o caso que hoje nenhum teste cobre — por isso a suite fica verde).
+
+Com (1) e (2) feitos e validados, os 5 MF originais + NOVO-1 + NOVO-2 ficam em
+ordem e e DEFENSAVEL ligar em paper. Como esta hoje (default pct=1.0 + residuo em
+disco): AINDA NAO.
+
+================================================================================
+PARTE A — NOVO-1 e NOVO-2: CORRIGIDOS (reproduzido, nao so lido)
+================================================================================
+
+--------------------------------------------------------------------------------
+[NOVO-1] Boot-halt do guard em conta FLAT — CORRIGIDO. (reproduzido ponta a ponta)
+--------------------------------------------------------------------------------
+ARQUIVOS: main.py:111-179 (_build_beta_guard) ; strategies/beta_rebalancer.py:
+199-217 (beta_sleeve_nav) ; 175-196 (resolve_sleeve_capital).
+
+A correcao: a base do guard deixou de ser o MARKET VALUE das posicoes (0 em conta
+flat -> causava daily_pl -100% e halt pegajoso) e passou a ser o NAV do sleeve =
+capital ALOCADO + P&L. Em conta flat o P&L e 0, logo NAV = capital alocado (>0) e
+o guard nasce sadio.
+
+EVIDENCIA QUE EU MESMO RODEI (BETA_LIVE_ENABLED=1):
+  (1) Boot flat via o REAL _build_beta_guard (conta com caixa 100k, ZERO posicoes
+      do beta), DB limpo:
+        guard.trading_halted == False ; halt_reason == None
+        guard.start_equity == 100000.0 (= capital alocado = pct 1.0 * equity)
+        persistido beta:risk_start_equity:<hoje> == 100000.0
+  (2) RESTART enquanto ainda flat (o caso que o v2 mostrou pegajoso): ainda
+      trading_halted == False (nao re-halta).
+  (3) GO-LIVE COMPLETO (build_app com a flag ON -> _BetaRebalanceOrchestrator),
+      conta flat, DB limpo, asof = 2o pregao do mes (r+1 = 2026-06-02), cache REAL:
+        - orchestrator type == _BetaRebalanceOrchestrator (wrapper ativo)
+        - guard do build_app: halted == False
+        - 1a rebalanceada: 3 intencoes (3 BUYs), target {SPY .26, QQQ .197,
+          IEF .678, GLD .141}; plan.equity == 100000 (NAV do sleeve)
+        - EXECUTADA pelo Executor real: 3 ordens, broker.submitted == 3
+        - BOOK CONSTRUIDO (nao vazio). O track record NAO nasce plano.
+  (4) Lado complementar (o fix nao desarmou o guard): em boot LIMPO,
+        - sleeve -> 93900 (-6.1% intradia)  => HALT "daily loss limit (-6.10%)"
+        - DD -29% vs peak (entre dias)       => HALT (gate de drawdown)
+      Ou seja: o halt FANTASMA do boot sumiu, mas o halt REAL por perda do sleeve
+      CONTINUA funcionando.
+
+  STATUS NOVO-1: CORRIGIDO. O sintoma central (book vazio no go-live) nao se
+  reproduz mais com o wiring real. (Ressalva: ver NOVO-3 e NOVO-4, que sao novos.)
+
+--------------------------------------------------------------------------------
+[NOVO-2] Feed de dados VIVO — CORRIGIDO. (reproduzido: job + force + fail-safe +
+         paridade preservada)
+--------------------------------------------------------------------------------
+ARQUIVOS: strategies/beta_live.py:239-318 (refresh_production_panel +
+schedule_panel_refresh) ; main.py:348-375 (wiring atras da flag) ;
+agents/monitor.py:66-83 (on_schedule_start chamado no start()).
+
+EVIDENCIA QUE EU MESMO RODEI:
+  (1) REGISTRO DO JOB (flag ON): schedule_panel_refresh agenda 1 job
+        id='beta_panel_refresh', trigger cron[hour='11', minute='0'] (UTC).
+      E o Monitor.start() de fato chama on_schedule_start(scheduler) (lido em
+      monitor.py:75-79); build_app liga schedule_panel_refresh dentro de _on_start.
+  (2) AVANCA O ASOF (force=True): monkeypatchei load_production_panel e confirmei
+      que refresh_production_panel a chama com force=True; o retorno traz
+      {refreshed:True, asof:<ultima barra>} -> o asof avanca.
+  (3) FAIL-SAFE DE REDE (reproduzido contra COPIA do cache real): forcei
+      _yf_download a levantar ConnectionError. Resultado:
+        - refresh_production_panel NAO levantou (retornou
+          {refreshed:False, note:'falha de rede (fail-safe)'});
+        - o CSV do cache (SPY, 8402 linhas) ficou BIT-A-BIT igual antes/depois
+          (load_close so reescreve quando o download volta dados nao-vazios:
+          beta_portfolio.py:152 `if write and not df.empty`).
+      Degrada p/ "usa o ultimo painel", nunca derruba o sistema.
+  (4) PARIDADE BIT-A-BIT preservada sobre o painel (o gate central de fidelidade):
+      target_weights_for_date(asof) vs production_weight_frame.loc[asof] em 401
+      viradas de mes (r+1): max erro absoluto = 0.000e+00. O refresh usa o MESMO
+      load_panel, entao a IDENTIDADE de calculo nao muda — so a data do ultimo
+      close avanca. SEM look-ahead (perturbar barra futura -> delta 0.0).
+  (5) CADENCIA: 11:00 UTC e pre-mercado dos EUA; o close de ONTEM ja esta no
+      yfinance entao, e o rebalance dispara na janela perto do close (~19:40-20:40
+      UTC). Logo o asof do rebalance de hoje = close de ONTEM (a base .shift(1) do
+      backtest). Coerente.
+
+  STATUS NOVO-2: CORRIGIDO. (Nota de operacao: a 1a corrida real do refresh fara o
+  PRIMEIRO download vivo do yfinance — exercicio de rede ainda nao rodado, mas o
+  fail-safe cobre a falha; nao bloqueia.)
+
+================================================================================
+PARTE B — REGRESSAO NOVA (introduzida pela correcao de NOVO-1/MF-4)
+================================================================================
+
+================================================================================
+[NOVO-3] ALTO / BLOQUEADOR — DUPLA CONTAGEM de P&L no NAV do sleeve quando
+         BETA_SLEEVE_CAPITAL_PCT=1.0 (o DEFAULT e o config de go-live documentado).
+================================================================================
+ARQUIVOS: strategies/beta_rebalancer.py:175-196 (resolve_sleeve_capital) +
+199-217 (beta_sleeve_nav) ; consumido em main.py:138-139 (boot) e main.py:208-209
+(update vivo a cada ciclo) e beta_rebalancer.py:458-462 (sizing em compute_plan).
+
+A RAIZ (defeito de conceito):
+  beta_sleeve_nav(broker, allocated) := allocated + beta_sleeve_pnl(broker)
+  O docstring (linhas 211-216) assume que `allocated` e o CAIXA ALOCADO FIXO
+  (constante no tempo): boot flat NAV=alocado; apos comprar X, caixa=alocado-X e
+  mv=X -> NAV=alocado; posicoes andam +dP -> NAV=alocado+dP. Esse raciocinio so
+  vale se `allocated` for CONSTANTE.
+  POReM resolve_sleeve_capital, com pct=1.0 (default), devolve pct * equity_ATUAL,
+  e equity_atual JA INCLUI o P&L nao-realizado. Entao:
+       NAV = (equity, que ja contem +P&L) + P&L   =  equity + 2*P&L
+  -> o P&L e contado DUAS VEZES assim que o sleeve tem posicoes que se movem.
+  O claim do docstring "Em paper so-beta isto bate com o equity da conta" SO e
+  verdadeiro no instante em que P&L==0 (boot ou imediatamente apos a entrada).
+
+REPRODUCAO 1 (paper so-beta, default pct=1.0, passo a passo):
+  - flat:               equity 100000 ; resolve_cap 100000 ; nav 100000   (ok)
+  - comprou 500 SPY@100: equity 100000 ; resolve_cap 100000 ; nav 100000   (ok, P&L 0)
+  - SPY -> 110 (+10%):   equity 105000 ; resolve_cap 105000 ; pnl +5000 ;
+                         nav 110000  <-- nav - equity = +5000 (P&L DUPLICADO).
+
+REPRODUCAO 2 (o lado PERIGOSO — uma PERDA distorce o guard p/ DISPARAR cedo):
+  Sleeve totalmente investido (1000 SPY@100), SPY cai -30% (-> 70):
+    - TRUE account equity = 70000  (drawdown real -30%)
+    - resolve_cap (pct*equity) = 70000 ; pnl = -30000
+    - sleeve_nav = 70000 + (-30000) = 40000  <-- DUPLA CONTAGEM da perda
+    - guard ve DD = (40000-100000)/100000 = -60% (vs -30% real) => HALT.
+  O guard dispara com METADE do drawdown verdadeiro.
+
+REPRODUCAO 3 (SEVERIDADE — halt prematuro DENTRO da faixa normal do produto):
+  Sleeve investido 100k, queda lenta entre dias ate -15% REAL:
+     px=97  -> TRUE -3%  | guard ve -6%
+     px=94  -> TRUE -6%  | guard ve -12%
+     px=90  -> TRUE -10% | guard ve -20%
+     px=87  -> TRUE -13% | guard ve -26%
+     px=85  -> TRUE -15% | guard ve -30%  => HALT (passa o -28%)
+  O produto espera MaxDD ~-19.7% (pior ano -10% a -11%). Com a dupla contagem o
+  halt de -28% vira um halt em ~-14%/-15% REAL — ou seja, DENTRO da operacao
+  normal. O bot pararia de rebalancear num pullback ordinario e o track record
+  ficaria truncado. (Mesma classe de dano do NOVO-1.)
+
+QUE A DUPLA CONTAGEM NAO ACONTECE COM CAPITAL ABSOLUTO (a saida):
+  Com BETA_SLEEVE_CAPITAL=100000 (absoluto, FIXO), apos SPY -30%:
+     resolve_cap = 100000 (fixo) ; pnl = -30000 ; nav = 70000 == equity. CORRETO.
+  Logo o conceito so quebra no ramo pct*equity. Em paper so-beta, o NAV correto e
+  simplesmente o equity da conta (sem somar P&L de novo).
+
+POR QUE OS TESTES NAO PEGARAM: o unico teste de sizing-sobre-sleeve
+(test_novo1_sizing_uses_sleeve_not_total_account_equity, linha 1048) usa
+BETA_SLEEVE_CAPITAL=100000 ABSOLUTO (linha 1058) e posicoes no preco de entrada
+(P&L 0). Os dois desvios escondem exatamente o bug: capital fixo + P&L 0. NENHUM
+teste exercita pct=1.0 COM posicoes do beta carregando P&L. A suite (355) fica
+verde por nao cobrir o caminho que quebra.
+
+SEVERIDADE: ALTA. Afeta o caminho VIVO real (main.py:208-209 roda a cada ciclo) na
+config DEFAULT/documentada de go-live. Halt prematuro -> track record truncado.
+Direcao "para cedo" e fail-safe p/ a CONTA, mas e fatal p/ o OBJETIVO (gravar a
+serie auditada).
+CORRECAO: resolve_sleeve_capital deve retornar o CAIXA ALOCADO fixo; em paper
+so-beta usar broker.get_account().equity como NAV (sem +P&L). OU travar
+BETA_SLEEVE_CAPITAL absoluto no go-live (mitigacao imediata, reproduzida OK).
+
+================================================================================
+[NOVO-4] MEDIO / BLOQUEADOR-OPERACIONAL — residuo STALE em disco neutraliza o gate
+         de perda diaria no 1o dia.
+================================================================================
+ARQUIVOS: main.py:148-151 + 161 (_build_beta_guard le start persistido; coage <=0
+p/ 1) ; risk/portfolio_guard.py:48-51 (gate diario depende de start_equity>0) ;
+estado real: data/trading.sqlite.
+
+ESTADO REAL ENCONTRADO (dump do data/trading.sqlite que eu rodei):
+    beta:risk_start_equity:2026-06-15 = '0'     <-- LIXO da versao buggada do NOVO-1
+    beta:risk_peak_equity             = '100000.0'
+    risk_start_equity:2026-06-15      = '99999.92'
+    risk_peak_equity                  = '100000'
+
+O QUE ACONTECE (reproduzido com esse residuo):
+  - _build_beta_guard le beta:risk_start_equity:<hoje> = 0. Como NAO e None, NAO
+    sobrescreve (main.py:148-149). Depois coage start_equity p/ Decimal("1")
+    (main.py:161) porque 0 nao e > 0.
+  - Com start_equity=1, o gate de PERDA DIARIA usa denominador 1: daily_pl =
+    (nav-1)/1. Reproduzido: uma posicao do beta caindo -10% intradia NAO dispara
+    o halt diario de -6% (o gate fica NEUTRALIZADO no dia). Sobra so o gate de
+    max-DD (pico-a-vale) como backstop.
+  - O guard NAO nasce haltado (bom — o sintoma do NOVO-1 nao volta), mas a
+    protecao DIARIA do 1o dia fica desligada silenciosamente.
+
+POR QUE IMPORTA NO GO-LIVE: o disco real JA TEM esse 0 hoje. Ligar agora herda o
+gate diario neutralizado no 1o dia. Some-se a isso o NOVO-3 (dupla contagem) e a
+leitura de risco do 1o dia fica duplamente distorcida.
+SEVERIDADE: MEDIO. Backstop de max-DD ainda existe; mas a defesa diaria some no
+dia do go-live.
+CORRECAO: (a) limpar a chave stale antes de ligar; e (b) na raiz, quando o valor
+persistido for <=0, re-derivar do NAV do boot em vez de coagir p/ 1 (a coercao p/
+1 e o que neutraliza o gate). Mesma familia do fix de NOVO-3.
+
+================================================================================
+PARTE C — O QUE CONTINUA CORRETO (verificado nesta rodada, nao so lido)
+================================================================================
+[OK] MF-4 isolamento de HALT (com BETA_SLEEVE_CAPITAL absoluto): tombo de AAPL
+     (-50%) NAO halta o beta; tombo de SPY (-40%) HALTA o beta. Reproduzido pelo
+     caminho de update vivo (resolve_sleeve_capital + beta_sleeve_nav).
+[OK] MF-4 keys proprias: pre-semeei risk_peak_equity=999999 e
+     risk_start_equity:<hoje>=888888; apos _build_beta_guard do beta, AMBAS
+     intactas. O beta usa beta:risk_* (separadas).
+[OK] PARIDADE vivo==backtest BIT-A-BIT (0.0) em 401 viradas; sem look-ahead.
+[OK] FLAG OFF == legado (reproduzido end-to-end): build_app -> LocalOrchestrator
+     (nao o wrapper); monitor.on_schedule_start is None; TrailingStop._excluded ==
+     set() (protege todo long, legado); run_beta_rebalance_cycle ->
+     {enabled:False} com 0 chamadas ao executor; schedule_eod_capture/
+     schedule_panel_refresh -> False com 0 jobs; importar os modulos do beta com a
+     flag off nao baixa dados nem toca o broker.
+[OK] FakeBroker.buying_power: default None -> == cash (legado a-vista); explicito
+     modela margem com equity inalterado; usado SO em tests/ (grep confirmou:
+     nenhuma injecao em codigo de producao). AlpacaBroker.get_account reporta o
+     acct.buying_power REAL da Alpaca (broker/alpaca_broker.py:95), entao a
+     validacao do Executor funciona vivo.
+[OK] SUITE COMPLETA: 355 passed (reproduzido), sem skips/xfails. (Ressalva: nao
+     cobre pct=1.0 + P&L do beta -> NOVO-3 passa despercebido.)
+[OK] Cripto: alvo de BTC/ETH = 0 hoje e nos ultimos 120 dias -> rota de cripto
+     continua LATENTE (nao dispara agora); dispatch/normalizacao/TIF ja conferidos
+     no v2. Smoke-test de 1 ordem de cripto antes de o vol-target alocar >0
+     continua valendo.
+
+NOTA DE FIDELIDADE (pre-existente, NAO regressao desta rodada): o alvo de IEF hoje
+e 0.678 e o teto por simbolo do guard do beta e 60% -> os BUYs de IEF sao
+BLOQUEADOS ("exposicao por simbolo excedida (67.82% > 60.00%)"). O backtest nao tem
+esse teto. Logo o book vivo sub-aloca IEF vs. o backtest de forma sistematica. e
+calibracao de guard (julgada defensavel no v2), mas vale registrar: a serie viva
+divergira do backtest nesse leg de bonds enquanto o alvo passar de 60%.
+
+================================================================================
+RESUMO EXECUTIVO
+================================================================================
+NOVO-1 (boot-halt) e NOVO-2 (feed vivo) estao CORRIGIDOS e eu os reproduzi com o
+wiring e o cache reais: o boot flat nasce sadio, a 1a rebalanceada constroi o book,
+e ha refresh diario com fail-safe e paridade bit-a-bit. O isolamento do MF-4
+continua de pe (com capital absoluto). FLAG OFF == legado; 355 testes verdes.
+
+MAS NAO LIGAR ainda. A propria correcao de NOVO-1/MF-4 (o "NAV do sleeve =
+alocado + P&L") trouxe uma REGRESSAO NOVA:
+  - [NOVO-3 ALTO] com o DEFAULT pct=1.0 (o config de go-live documentado), o
+    `alocado` e recalculado como pct*equity (que ja inclui P&L), entao o NAV conta
+    o P&L DUAS VEZES. Reproduzido: o guard ve ~2x o drawdown real; um drawdown
+    NORMAL de -15% e lido como -30% e dispara o halt de -28%, truncando o track
+    record num pullback ordinario.
+  - [NOVO-4 MEDIO] o disco real (data/trading.sqlite) ja carrega
+    'beta:risk_start_equity:hoje=0' (lixo pre-fix); no boot isso vira start=1 e
+    NEUTRALIZA o gate de perda diaria no 1o dia. Reproduzido.
+
+Ambos tem a mesma raiz (o tratamento de start_equity/alocado quando o valor e
+<=0 ou quando pct=1.0 inclui P&L) e a correcao e pequena:
+  1. resolve_sleeve_capital -> CAIXA ALOCADO FIXO (nao pct*equity); paper so-beta
+     usa o equity da conta como NAV (sem +P&L). MITIGACAO IMEDIATA reproduzida:
+     fixar BETA_SLEEVE_CAPITAL absoluto = caixa do paper (entao NAV==equity exato).
+  2. quando o start persistido for <=0, re-derivar do NAV do boot (nao coagir p/ 1);
+     e limpar a chave stale no disco antes de ligar.
+  3. testes cobrindo pct=1.0 COM posicoes do beta com P&L.
+
+Feito (1) e (2) e validado, e DEFENSAVEL ligar em paper p/ gravar o baseline. Como
+esta hoje (default pct=1.0 + residuo em disco): AINDA NAO.
+================================================================================

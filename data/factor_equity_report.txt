@@ -1,0 +1,53 @@
+==============================================================================
+TRIBUNAL DE FATORES DE ACOES (price-based) — momentum + low-vol
+==============================================================================
+Universo: 45 nomes liquidos (S&P 100). Janela 1984-10-17 .. 2026-06-17
+Dias de pregao: 10497 | rebalances mensais: 501
+Custo (EQUITY_BASE): base 3 bps/lado | VEREDITO no ESTRESSADO 6 bps/lado
+n_trials (honesto) = 60  (3 fatores x 2 variantes x lookbacks mom/vol x 2 cortes)
+PBO (CSCV, todas as 60 configs, estressado) =   0.00  [<0.5 minimo; menor=melhor]
+
+(1) TABELA — melhor config por familia (cenario ESTRESSADO) vs benchmark vs beta
+------------------------------------------------------------------------------
+estrategia                    CAGR  Sharpe Sortino   MaxDD  Calmar  cBeta   cSPY
+mom_12m_Q_LO                 28.6%    1.17    1.57  -51.1%    0.56   0.58   0.73
+lowvol_6m_T_LO               14.9%    0.98    1.26  -36.1%    0.41   0.50   0.72
+combo_m12_v3_T_LO            17.6%    1.03    1.31  -37.7%    0.47   0.55   0.76
+BENCH_equal_weight           21.0%    1.08    1.38  -50.8%    0.41   0.58   0.86
+BENCH_SPY                     8.6%    0.58    0.66  -55.2%    0.16   0.62    n/a
+BETA_voltarget                7.2%    0.98    1.34  -27.6%    0.26    n/a   0.62
+
+    DSR/PSR das headlines (n_trials e dispersao real entre trials):
+      mom_12m_Q_LO           [FALHA] Sharpe_anual=1.17 (obstaculo data-snooping=1.60) | PSR=1.000 DSR=0.004 | n=10234 trials=60 skew=-0.41 kurt=14.76
+      lowvol_6m_T_LO         [FALHA] Sharpe_anual=0.98 (obstaculo data-snooping=1.60) | PSR=1.000 DSR=0.000 | n=10362 trials=60 skew=-0.68 kurt=28.62
+      combo_m12_v3_T_LO      [FALHA] Sharpe_anual=1.03 (obstaculo data-snooping=1.60) | PSR=1.000 DSR=0.000 | n=10234 trials=60 skew=-0.87 kurt=27.62
+
+(2) ROBUSTEZ AOS LOOKBACKS — Sharpe anual medio +/- desvio por familia/variante
+------------------------------------------------------------------------------
+  mom     LO  : Sharpe   1.11 +/-   0.04  (n=6 configs)  [estavel]
+  mom     LS  : Sharpe   0.24 +/-   0.11  (n=6 configs)  [estavel]
+  lowvol  LO  : Sharpe   0.94 +/-   0.02  (n=6 configs)  [estavel]
+  lowvol  LS  : Sharpe  -0.70 +/-   0.02  (n=6 configs)  [estavel]
+  combo   LO  : Sharpe   0.95 +/-   0.04  (n=18 configs)  [estavel]
+  combo   LS  : Sharpe  -0.34 +/-   0.09  (n=18 configs)  [estavel]
+
+(3) CORRELACAO COM O BETA (diversifica?)
+------------------------------------------------------------------------------
+    cBeta = corr diaria com o vol-target (nosso produto vivo).
+      mom_12m_Q_LO               cBeta=  0.58 [redundante c/ beta]
+      lowvol_6m_T_LO             cBeta=  0.50 [redundante c/ beta]
+      combo_m12_v3_T_LO          cBeta=  0.55 [redundante c/ beta]
+      BENCH_equal_weight         cBeta=  0.58 [redundante c/ beta]
+      BENCH_SPY                  cBeta=  0.62 [redundante c/ beta]
+
+(4) VEREDITO
+------------------------------------------------------------------------------
+  mom_12m_Q_LO: DSR=0.00(X) Sharpe=1.17(ok) bate_EW=nao(EW Sharpe=1.08) diversifica=nao(cBeta=0.58) -> FALHA
+  lowvol_6m_T_LO: DSR=0.00(X) Sharpe=0.98(ok) bate_EW=nao(EW Sharpe=1.08) diversifica=nao(cBeta=0.50) -> FALHA
+  combo_m12_v3_T_LO: DSR=0.00(X) Sharpe=1.03(ok) bate_EW=nao(EW Sharpe=1.08) diversifica=nao(cBeta=0.55) -> FALHA
+
+  Robustez geral aos lookbacks: OK
+  PBO: 0.00 (aceitavel)
+
+  >>> VEREDITO FINAL: CEMITERIO
+==============================================================================

@@ -1,0 +1,46 @@
+========================================================================
+TRIBUNAL: Volatility Risk Premium (venda sistematica de opcoes)
+========================================================================
+data_status = limited (sem cadeia de opcoes real gratis; premio via BS+VIX)
+Periodo: 1993-01-29 -> 2026-06-16 (8402 pregoes)
+Estrutura: SHORT PUT mensal cash-secured, IV=VIX(t-1), payoff caminho real
+Custo: 5.0 bps notional (base) / 10.0 bps (estressado, usado no veredito)
+n_trials honesto = 24 (moneyness x lev x gate)
+
+MELHOR CONFIG (por Sharpe IS): m0.92_l0.5_g1
+  moneyness=0.92 leverage=0.5 regime_gate=True
+
+--- METRICAS (cenario ESTRESSADO, liquido) ---
+  Sharpe_anual = 1.849
+  CAGR         = 2.20%
+  MaxDD        = -5.24%
+  DSR          = 0.9569  (barra >= 0.95)
+  PSR          = 0.9936
+  PBO          = 0.2421  (barra < 0.5)
+  skew         = -10.544  kurt = 164.40
+  obstaculo data-snooping (Sharpe anual) = 0.576
+
+--- vs BUY&HOLD SPY (mesmo periodo, mensal) ---
+  B&H Sharpe=0.754 CAGR=10.83% MaxDD=-52.25%
+  correlacao VRP vs SPY = 0.380
+  bate_bh(CAGR)=False  diversifica(corr<0.5 & SR>0.5)=True
+
+--- ROBUSTEZ DE FASE DE ROLL (config vencedora, estressado) ---
+  Sharpe por offset (0..20): [1.85, 1.25, 0.68, 0.62, 0.66, 0.53, 0.99, 0.76, 1.22, 0.71, 2.36]
+  Sharpe mediano=0.76 minimo=0.53  robusto(>=0.8)=False
+  NOTA: o Sharpe da config defensiva e instavel entre fases de roll =>
+        o 'pass' do offset fixo e SORTE de fase, nao edge robusta.
+
+--- CONFIG ECONOMICA (ATM 1.0x, a que de fato colhe o VRP) ---
+  Sharpe=1.24 CAGR=11.09% MaxDD=-29.0% corr_SPY=0.87 pior_mes=-16.2%
+  => colhe ~11% CAGR (= B&H) mas corr~0.87: e beta de bull alavancado
+     com cauda esquerda truncada-em-cima/aberta-embaixo. NAO diversifica.
+
+--- RISCO DE CAUDA (pior evento por crise, config vencedora) ---
+  GFC_2008: retorno_total=1.0%  pior_mes=-2.9%  MaxDD=-2.9%
+  COVID_2020: retorno_total=-5.2%  pior_mes=-9.2%  MaxDD=0.0%
+  BEAR_2022: retorno_total=3.6%  pior_mes=0.2%  MaxDD=0.0%
+
+VEREDITO: passed = False
+  motivos: Sharpe instavel entre fases de roll (mediano 0.76<0.8)
+========================================================================

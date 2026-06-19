@@ -1,0 +1,131 @@
+================================================================================
+PROGRAMA DE VALIDACAO DE ALPHA — ROUND 2 (VEREDITO CONSOLIDADO)
+Tese do round: DIVERSIFICAR O BETA. O que importa nao e retorno bruto, e baixa
+correlacao ao SPY + crisis-alpha (defesa nos crashes). Barra de graduacao:
+DSR >= 0.95 E Sharpe liquido robusto E (bate buy&hold OU diversifica com corr
+BAIXA ao mercado melhorando o conjunto) E robusto OOS. Imparcial. Sem suavizar.
+Data: 2026-06-18.
+================================================================================
+
+CONTEXTO (round 1): 9 familias (value+quality, VRP, style-premia, PEAD, FX carry,
+commodity carry, BAB, pairs, crypto market-making) TODAS reprovaram. Padrao
+recorrente: "Sharpe alto = beta disfarcado (corr ~0.9 ao SPY); o que era de fato
+ortogonal tinha edge fraco demais p/ sobreviver a custo e a deflacao por n_trials".
+O round 2 atacou esse padrao de frente com 5 familias desenhadas p/ diversificar.
+
+--------------------------------------------------------------------------------
+PLACAR ROUND 2 (5 candidatos)
+--------------------------------------------------------------------------------
+                                              passed  Sharpe  DSR    corr_SPY  data
+1. Dual Momentum / TAA (Faber/GTAA)           TRUE    1.17    0.999  0.63      real
+2. Trend-following / Managed-futures (TSMOM)   false  0.46    0.581  -0.17     real
+3. Crypto trend-following (TSMOM majors)       false  0.58    0.590  -0.02     real
+4. Short-term reversal (1-5d acoes)            false  0.61    0.158   0.10     real
+5. Residual (idiosyncratic) momentum           false -0.03    0.197   0.05     limited
+
+GRADUADOS: 1 de 5 (Dual Momentum / TAA). Confirmado por verificacao adversarial.
+
+================================================================================
+(1) RANKING DOS SOBREVIVENTES — metricas + corr ao SPY + crash behavior
+================================================================================
+
+Apenas UM candidato sobreviveu a barra completa. Listo tambem os "quase-sleeves"
+(reprovados standalone mas com diversificacao genuina) porque a tese do round e
+diversificacao, e o conselho precisa saber o que existe de real ainda que abaixo
+da barra.
+
+--- #1 — GRADUADO: DUAL MOMENTUM / TAA (absolute + relative momentum) ----------
+   Config campea: broad8_L6_N4_AGG (universo SPY/QQQ/EFA/EEM/VNQ/DBC/GLD/TLT,
+   lookback 6m, top-4, defensivo AGG). Cenario de custo ESTRESSADO 2x.
+   Sharpe liq 1.17 | CAGR 12.2% | MaxDD -13.6% | DSR 0.999 | PBO 0.18 | corr_SPY 0.63
+   n_trials HONESTO = 80 (5 lookbacks x 4 top-N x 2 defensivos x 2 universos).
+   Sem look-ahead (sinal usa closes <= mes-end; pesos vigem so no dia seguinte via
+   shift(1) — pipeline auditado linha a linha em simulation/dual_momentum.py:182-229).
+   Sem alavancagem (soma de pesos diaria em [0,1]). Turnover 4.6x/ano two-sided.
+
+   CRASH BEHAVIOR (a parte que importa):
+     - 2008 (GFC): estrategia +8.6% enquanto SPY -36.8% e 60/40 -16.7%.
+     - 2022 (bear): estrategia -11% vs SPY -18%.
+     - Correlacao ao SPY DESPENCA nos meses de crash: 0.118 quando SPY < -3%
+       (vs 0.63 full-sample). Convexidade genuina vinda do gate de momentum
+       absoluto (rotacao p/ bonds/AGG quando o trend vira).
+     - Retorno medio nos meses de queda: -2.3% (estrategia) vs -6.6% (SPY).
+   vs 60/40 buy&hold: bate em AMBOS criterios — risco-ajustado MELHOR (Sharpe
+     1.17 vs 0.90) E drawdown CORTADO PELA METADE (-13.6% vs -28.2%).
+   OOS: config escolhida SO na 1a metade (2007-2016) e a MESMA campea; entrega
+     Sharpe 1.27 OOS na 2a metade (2016-2026), batendo 60/40 nas duas metades.
+   CAVEAT HONESTO (do proprio veredito, mantido): isto e BETA DISCIPLINADO de
+     classes de ativo (defesa via rotacao p/ bonds), NAO alpha price-based puro.
+     O ganho de DD vem do regime gate de momentum absoluto, nao de uma ilha de
+     sorte (configs boas L3-6/N3-4 clusterizadas; as ruins sao so N=1 concentrado).
+   VEREDITO: PASSA. Aprovado como SLEEVE DE TAA DEFENSIVO.
+
+--- #2 — "QUASE-SLEEVE" (reprovado, mas diversificacao real): TSMOM CROSS-ASSET --
+   16 ETFs cross-asset (equities/bonds/commodities/metais/REIT/FX), 2008-2026.
+   Sharpe liq 0.46 | CAGR 2.9% | MaxDD -12.5% | DSR 0.581 | PBO 0.374 | corr_SPY -0.17
+   CRASH BEHAVIOR (a tese de managed-futures): crisis-alpha REAL — +6.2% no GFC
+     2008 e +12.6% no bear 2022 (enquanto SPY -34.7%/-17.7%); media +0.84%/mes nos
+     piores 10% meses do SPY (vs -7.8% do SPY). corr ao SPY -0.17 diaria / -0.08
+     mensal. Um 60/40 + 20% deste sleeve MELHORA o conjunto: Sharpe 0.84 -> 0.91,
+     MaxDD -27.2% -> -20.0%.
+   POR QUE NAO GRADUA: standalone falha a barra — Sharpe liq estressado 0.46
+     (< piso ~0.5), DSR 0.581 (<< 0.95), nao bate SPY buy&hold (0.46 vs 0.70),
+     robustez fraca por lookback (so 6m razoavel; 1m negativo). Skew ~0 (a amostra
+     pos-2009, "managed-futures winter", nao teve trends sustentados -> nao
+     entregou o skew positivo da tese). Beneficio de diversificacao SEM edge
+     standalone significativo NAO cumpre a barra como escrita.
+   STATUS: vale APENAS como overlay tatico de crisis-hedge no 60/40 (peso pequeno),
+     nunca standalone, e mesmo assim exige auditoria antes de capital real.
+
+================================================================================
+(2) CEMITERIO ROUND 2 (motivo de 1 linha cada)
+================================================================================
+- TSMOM cross-asset (managed-futures): DSR 0.58 << 0.95 e nao bate SPY; diversifica
+  de verdade (corr -0.17, crisis-alpha real) mas sem edge standalone -> so overlay.
+- Crypto trend-following (TSMOM majors): custo do rebalance diario mata (Sharpe
+  bruto 1.19 -> estressado 0.58), DSR 0.59, edge morreu pos-2022 (OOS 1.86 -> -0.04),
+  nao bate B&H BTC; momentum direcional em cripto = beta de bull disfarcado.
+- Short-term reversal (1-5d acoes): sinal bruto real (Sharpe 1.41) mas custo mata
+  (net 0.61) e OOS negativo (-0.19 a -0.39) -> reversao de curto prazo arbitrada;
+  DSR 0.158, nao bate buy&hold; corr baixa (0.10) nao salva sem edge liquido.
+- Residual (idiosyncratic) momentum: sem edge no universo gratis (DSR 0.197, Sharpe
+  ~0; data_status=limited — yfinance so entrega 50 mega-caps survivorship-biased);
+  ortogonal (corr 0.05) mas ortogonalidade sem edge nao vale nada.
+
+================================================================================
+(3) RECOMENDACAO IMPARCIAL
+================================================================================
+SIM — UM candidato gradua como sleeve diversificante do beta: DUAL MOMENTUM / TAA.
+
+POR QUE ele e nao os de "corr baixa pura":
+  O round 1 e o cemiterio do round 2 mostram a tesoura de sempre: o que era
+  ortogonal (TSMOM cross-asset corr -0.17; st-reversal corr 0.10; residual 0.05)
+  nao tinha edge liquido que sobrevivesse a custo + n_trials + OOS; o que tinha
+  Sharpe era beta. Dual Momentum quebra essa tesoura por um motivo especifico e
+  honesto: NAO e ortogonal full-sample (corr 0.63 — participa do bull), MAS a
+  correlacao COLAPSA exatamente quando importa (0.118 nos crashes), porque o gate
+  de momentum absoluto rotaciona p/ bonds/AGG. Ou seja, ele entrega o que a tese do
+  round pedia — REDUCAO DE DRAWDOWN e CRISIS-ALPHA — via gestao de risco/regime, e
+  faz isso passando o tribunal estatistico com folga (DSR 0.999, n_trials=80 honesto,
+  PBO 0.18, sem look-ahead, sem alavancagem, OOS forte e batendo 60/40 nas duas
+  metades, robusto a custo ate 30 bps/lado). Bate o 60/40 no risco-ajustado E corta
+  o DD pela metade. Confirmado em verificacao adversarial em todos os vetores.
+
+  O TSMOM cross-asset (managed-futures) tem o crisis-alpha mais "puro" da tese
+  (corr -0.17, +12.6% em 2022), mas falha a barra standalone (DSR 0.58, nao bate
+  SPY) -> fica como OVERLAY tatico opcional, nunca como sleeve graduado.
+
+DECISAO IMPARCIAL: o "beta puro" NAO segue sozinho. Ele ganha UM companheiro
+graduado — Dual Momentum / TAA defensivo — cujo valor provado e, como todo o resto
+do projeto, GESTAO DE RISCO (defesa via regime gate), nao alpha price-based. Honesto
+reconhecer: dos 14 candidatos dos rounds 1+2, este e o PRIMEIRO a graduar, e o faz
+como beta DISCIPLINADO de classes de ativo, alinhado a direcao ja escolhida do
+projeto (beta com vol-target + regime gate). Opcionalmente, um sleeve pequeno de
+TSMOM managed-futures como crisis-hedge tatico, sujeito a auditoria pre-capital.
+Nenhum alpha price-based puro graduou — o padrao do projeto se mantem.
+
+Pre-condicoes antes de qualquer capital real no sleeve TAA:
+  - assinatura do Coder (gate do projeto: sem $ real sem Coder assinar);
+  - reconciliacao/idempotencia e guards de risco no caminho vivo;
+  - re-rodar OOS estendendo a janela e revalidar turnover/custo no broker real.
+================================================================================

@@ -1,0 +1,83 @@
+============================================================================================
+TRIBUNAL DA FIMATHE REAL — entrada-no-rompimento do CANAL DE ABERTURA (intraday, M15)
+============================================================================================
+
+KILL-CRITERION: PASSA so se DSR>=0.95 E Sharpe_liq_anual>=1.0 E liquido>0 E supera buy&hold.
+Senao FALHA. (Intraday -> swap NAO se aplica; o teste e se ha EDGE LIQUIDO DE SPREAD.)
+Fills gap-aware (entrada no open pos-sinal; empate=>stop; liquida no close da sessao).
+Custo = SO spread (meio-spread por ponta). Serie = retorno por sessao. Benchmark = buy&hold (alpha).
+
+STATUS DOS DADOS (M15, Dukascopy, cache data/fimathe_intraday_cache/):
+  XAUUSD :   70826 barras M15  2023-06-15..2026-06-15  (~3.00 anos)
+  EURUSD :   74588 barras M15  2023-06-15..2026-06-15  (~3.00 anos)
+  GBPUSD :   74580 barras M15  2023-06-15..2026-06-15  (~3.00 anos)
+
+
+============================================================================================
+ATIVO: XAUUSD   spread=0.02500 (~2.5 pip)   BUY&HOLD: Sharpe_anual=1.25  ret_total=+120.1%
+============================================================================================
+              config |   #tr  tr/dia |  win% |  bruto/tr    liq/tr | Sh_liq |    DSR |  liq_tot    alpha | veredito
+  --------------------------------------------------------------------------------------------------------------------
+     XAUU/take1/base |   807    0.86 | 69.1% |   +0.021%   +0.020% |   0.67 |  0.011 |   +16.8%  -103.3% | FALHA(DSR,Sharpe,<B&H)
+  XAUU/take1/sem-sexta |   653    0.70 | 69.1% |   +0.015%   +0.014% |   0.40 |  0.002 |    +8.9%  -111.1% | FALHA(DSR,Sharpe,<B&H)
+     XAUU/take2/base |   807    0.86 | 60.2% |   +0.066%   +0.065% |   1.50 |  0.215 |   +66.2%   -53.9% | FALHA(DSR,<B&H)
+  XAUU/take2/sem-sexta |   653    0.70 | 59.9% |   +0.055%   +0.054% |   1.10 |  0.065 |   +40.6%   -79.4% | FALHA(DSR,<B&H)
+  PBO (selecao take x filtro, informativo): 0.00
+  robustez spread 3x (take2/base, spread~7.5 pip): liq/tr=+0.063%  Sh_liq=1.46  liq_tot=+63.8%
+
+============================================================================================
+ATIVO: EURUSD   spread=0.00006 (~0.6 pip)   BUY&HOLD: Sharpe_anual=0.28  ret_total=+5.9%
+============================================================================================
+              config |   #tr  tr/dia |  win% |  bruto/tr    liq/tr | Sh_liq |    DSR |  liq_tot    alpha | veredito
+  --------------------------------------------------------------------------------------------------------------------
+     EURU/take1/base |   901    0.96 | 63.9% |   -0.008%   -0.014% |  -1.55 |  0.000 |   -11.8%   -17.7% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+  EURU/take1/sem-sexta |   745    0.79 | 62.7% |   -0.008%   -0.014% |  -1.40 |  0.000 |    -9.9%   -15.8% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+     EURU/take2/base |   901    0.96 | 49.3% |   -0.016%   -0.021% |  -1.75 |  0.000 |   -17.7%   -23.7% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+  EURU/take2/sem-sexta |   745    0.79 | 48.9% |   -0.015%   -0.021% |  -1.54 |  0.000 |   -14.5%   -20.4% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+  PBO (selecao take x filtro, informativo): 0.66
+  robustez spread 3x (take2/base, spread~1.8 pip): liq/tr=-0.032%  Sh_liq=-2.63  liq_tot=-25.4%
+
+============================================================================================
+ATIVO: GBPUSD   spread=0.00009 (~0.9 pip)   BUY&HOLD: Sharpe_anual=0.23  ret_total=+4.9%
+============================================================================================
+              config |   #tr  tr/dia |  win% |  bruto/tr    liq/tr | Sh_liq |    DSR |  liq_tot    alpha | veredito
+  --------------------------------------------------------------------------------------------------------------------
+     GBPU/take1/base |   897    0.96 | 67.1% |   -0.004%   -0.011% |  -1.29 |  0.000 |    -9.7%   -14.6% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+  GBPU/take1/sem-sexta |   740    0.79 | 67.4% |   -0.003%   -0.010% |  -1.03 |  0.000 |    -7.2%   -12.1% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+     GBPU/take2/base |   897    0.96 | 53.1% |   -0.007%   -0.014% |  -1.16 |  0.000 |   -11.7%   -16.6% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+  GBPU/take2/sem-sexta |   740    0.79 | 53.6% |   -0.005%   -0.011% |  -0.88 |  0.000 |    -8.2%   -13.1% | FALHA(DSR,Sharpe,liq<=0,<B&H)
+  PBO (selecao take x filtro, informativo): 0.61
+  robustez spread 3x (take2/base, spread~2.7 pip): liq/tr=-0.028%  Sh_liq=-2.33  liq_tot=-22.0%
+
+============================================================================================
+VEREDITO FINAL
+============================================================================================
+n_trials honesto = 3 ativos x 2 niveis-take x 2 filtros = 12
+
+LEITURA DO RESULTADO (sem suavizar):
+  - XAUUSD (o ativo PRIMARIO dele): o rompimento do Canal de Abertura tem um
+    pequeno edge BRUTO positivo (take2: +0.066%/trade, win 60%), que sobrevive ao
+    spread (o spread do ouro e minusculo em % de uma cotacao de ~milhares). MAS:
+    (a) DSR=0.21 << 0.95 -> esse Sharpe de 1.50 NAO se distingue do melhor de 12
+    trials por puro acaso (nao e estatisticamente real); (b) rende +66% contra
+    +120% do buy&hold do ouro no periodo (alpha NEGATIVO de -54pp). Sharpe_liq
+    1.50 > 1.25 do B&H, mas com retorno absoluto MENOR e DSR reprovado: nao e
+    alpha que um investidor passivo nao consiga mais barato so segurando ouro.
+  - EURUSD e GBPUSD (majors): o rompimento e LEVEMENTE ADVERSO ate BRUTO
+    (-0.004 a -0.016%/trade) — falso-rompimento/reversao intraday. Com spread fica
+    claramente negativo. DSR=0.00. O metodo nao tem edge nos majors no M15.
+  - Robustez ao spread (3x): nao muda nada — XAU segue reprovado por DSR/B&H;
+    majors seguem negativos. O veredito NAO depende da hipotese de spread.
+  - O periodo 2023-2026 foi um BULL HISTORICO do ouro (B&H +120%): o 'lucro' do
+    setup no XAU e majoritariamente BETA desse bull capturado parcialmente, nao
+    edge da entrada-no-rompimento.
+
+##########################################################################
+#                                                                        #
+#                          F A L H A                                     #
+#                                                                        #
+#   A entrada-no-rompimento do CANAL DE ABERTURA NAO tem edge liquido    #
+#   de SPREAD (intraday, sem swap) em NENHUMA config/ativo.              #
+#   Nenhuma config passou DSR>=0.95 E Sharpe_liq>=1.0 E liq>0 E > B&H.    #
+#                                                                        #
+##########################################################################

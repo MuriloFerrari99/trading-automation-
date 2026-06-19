@@ -1,0 +1,64 @@
+================================================================================
+TRIBUNAL — SHORT-TERM REVERSAL (mean-reversion 1-5d em acoes), dollar-neutral
+================================================================================
+Universo: 45 nomes liquidos (S&P 100). Janela 1984-10-17 .. 2026-06-17
+Dias de pregao avaliados (headline): 10493
+Custo (EQUITY_BASE): base 3 bps/lado | VEREDITO no ESTRESSADO 6 bps/lado
+n_trials (honesto) = 48  (lookback{1,2,3,5} x hold{1,2,3,5} x cut{0.10,0.20,0.33})
+PBO (CSCV, todas as 48 configs, estressado) =   0.03  [<0.5 minimo; menor=melhor]
+
+HEADLINE = L2_H5_T  (lookback=2d, hold=5d, cut=0.33)
+
+(1) HEADLINE em 3 cenarios de custo vs benchmark vs beta
+--------------------------------------------------------------------------------
+serie                       CAGR  Sharpe Sortino   MaxDD  turn/d  cBeta   cSPY
+REV_head_grossNOcost        7.3%    1.41    2.07  -15.5%    0.27   0.10   0.16
+REV_head_base               5.1%    1.01    1.49  -23.7%    0.27   0.10   0.16
+REV_head_stress             3.0%    0.61    0.91  -41.6%    0.27   0.10   0.16
+BENCH_equal_weight         21.0%    1.08    1.38  -50.8%     n/a   0.58   0.86
+BENCH_SPY                   8.6%    0.58    0.66  -55.2%     n/a   0.62    n/a
+BETA_voltarget              7.2%    0.98    1.34  -27.6%     n/a    n/a   0.62
+
+    DSR/PSR da headline (n_trials e dispersao real entre trials):
+      grossNOcost : [PASSA] Sharpe_anual=1.41 (obstaculo data-snooping=0.76) | PSR=1.000 DSR=1.000 | n=10493 trials=48 skew=1.10 kurt=20.84
+      base(3bps)  : [FALHA] Sharpe_anual=1.01 (obstaculo data-snooping=0.76) | PSR=1.000 DSR=0.948 | n=10493 trials=48 skew=1.10 kurt=20.84
+      stress(6bps): [FALHA] Sharpe_anual=0.61 (obstaculo data-snooping=0.76) | PSR=1.000 DSR=0.158 | n=10493 trials=48 skew=1.10 kurt=20.84
+
+(2) SWEEP DE CUSTO (headline) — onde o edge morre
+--------------------------------------------------------------------------------
+      custo bps/lado  Sharpe_liq      CAGR
+                 0.0        1.41      7.3%
+                 1.0        1.28      6.5%
+                 2.0        1.14      5.8%
+                 3.0        1.01      5.1%  <== custo base/estress
+                 4.0        0.88      4.4%
+                 6.0        0.61      3.0%  <== custo base/estress
+                 8.0        0.35      1.6%
+                10.0        0.08      0.3%
+                15.0       -0.58     -3.0%
+                20.0       -1.24     -6.2%
+    BREAK-EVEN de custo (Sharpe_liq -> 0): 10.6 bps/lado
+    -> turnover medio diario da headline = 0.27 (sum|dw|/dia; cada 1.0 = ~1x book girado/dia)
+
+(3) OOS (walk-forward 50/50, custo estressado)
+--------------------------------------------------------------------------------
+    Headline L2_H5_T: Sharpe IS(1a metade)=1.40  OOS(2a metade)=-0.19
+    Selecao-por-IS: melhor IS = L1_H5_T  Sharpe_IS=1.48  -> OOS=-0.39
+
+(4) ROBUSTEZ entre as 48 configs (Sharpe anual estressado)
+--------------------------------------------------------------------------------
+    media=0.23  desvio=0.33  fracao c/ Sharpe>0 = 88%
+
+(5) VEREDITO (cenario ESTRESSADO — a regua do programa)
+--------------------------------------------------------------------------------
+  DSR>=0.95 ? 0.158  -> FALHA
+  Sharpe_liq>=0.8 ? 0.61  -> FALHA
+  Bate buy&hold (EW Sharpe=1.08) ? nao
+  Diversifica (corr baixa, Sharpe>0.3) ? sim (corr=0.10)
+  OOS robusto (Sharpe OOS>0.3) ? nao (OOS=-0.19)
+  PBO aceitavel (<0.5) ? sim (0.03)
+
+  >>> VEREDITO FINAL: CEMITERIO (reprovado)
+
+  DIAGNOSTICO: custo real consome o edge — Sharpe liquido abaixo da barra.
+================================================================================

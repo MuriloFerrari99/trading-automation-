@@ -1,0 +1,56 @@
+==============================================================================
+VEREDITO — CRYPTO TREND-FOLLOWING (TSMOM em majors, diario)
+==============================================================================
+
+Universo:        BTCUSDT, ETHUSDT, BNBUSDT, XRPUSDT, LTCUSDT, ADAUSDT, SOLUSDT, DOGEUSDT
+Dias no painel:  2343  | obs (melhor config): 2311
+n_trials (HONESTO, toda a grade 2 sinais x 4 lookbacks): 8
+
+------------------------------------------------------------------------------
+GRADE COMPLETA — Sharpe anual (liquido base / estressado 2x):
+  breakout20   net=  0.89   stress2x=  0.58
+  breakout10   net=  0.68   stress2x=  0.24
+  breakout50   net=  0.41   stress2x=  0.18
+  sign50       net=  0.49   stress2x=  0.05
+  sign20       net=  0.58   stress2x= -0.03
+  breakout100  net= -0.02   stress2x= -0.22
+  sign10       net=  0.47   stress2x= -0.33
+  sign100      net= -0.11   stress2x= -0.49
+
+------------------------------------------------------------------------------
+MELHOR CONFIG (por Sharpe estressado): breakout20
+  Sharpe bruto:        1.19
+  Sharpe liquido base: 0.89
+  Sharpe estressado2x: 0.58
+  CAGR (liq base):     20.5%
+  MaxDD (liq base):    -37.2%
+  OOS Sharpe 1a/2a metade: 1.86 / -0.04
+
+TRIBUNAL ESTATISTICO (sobre o melhor, estressado):
+  DSR = 0.590   (barra >= 0.95)
+  PSR = 0.930
+  Obstaculo data-snooping (Sharpe anual): 0.49
+  PBO (CSCV sobre as 8 configs) = 0.393   (barra < 0.5)
+
+ENSEMBLE equal-weight das 8 configs:
+  Sharpe net base=0.42  stress2x=-0.18  DSR=0.029
+  CAGR=6.1%  MaxDD=-37.6%
+
+BENCHMARK buy&hold BTC (mesma janela):
+  Sharpe=1.16  CAGR=71.3%  MaxDD=-76.6%
+
+ESTRESSE DE CORRELACAO:
+  corr ensemble vs SPY: None
+  corr melhor vs BTC buy&hold: -0.023
+
+------------------------------------------------------------------------------
+CHECKLIST DA BARRA:
+  [ ] DSR >= 0.95
+  [ ] Sharpe estressado >= 0.8 E OOS positivo nas 2 metades
+  [x] PBO < 0.5
+  [ ] bate buy&hold BTC (Sharpe e ~CAGR)
+  [ ] OU diversifica (|corr SPY|<0.3 e Sharpe>0.5)
+
+==============================================================================
+VEREDITO FINAL: FALHA
+==============================================================================

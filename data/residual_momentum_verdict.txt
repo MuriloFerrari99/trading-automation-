@@ -1,0 +1,46 @@
+==============================================================================
+TRIBUNAL — RESIDUAL (IDIOSYNCRATIC) MOMENTUM — EQUITIES US
+==============================================================================
+data_status: real
+
+TESE: momentum cross-seccional sobre residuos de modelo de fator
+(CAPM/FF3), long top / short bottom, market-neutral. Hipotese: maior
+Sharpe e mais ortogonal que momentum bruto (que ja reprovou).
+
+Config primaria (canonica, NAO a melhor IS): ff3|bw36|L12g1|f0.2
+n_trials honesto (todo o grid): 8
+meses avaliados: 133
+
+--- METRICAS (carteira long-short, custo ESTRESSADO 2x) ---
+Sharpe anual (estressado): -0.031
+Sharpe anual (custo base): -0.007
+CAGR: -0.51%   MaxDD: -29.08%
+corr ao SPY: 0.048
+skew: -0.31  kurtosis: 4.81
+
+--- TRIBUNAL ESTATISTICO ---
+DSR: 0.1973  (barra >= 0.95)
+PSR (SR>0): 0.4595
+obstaculo data-snooping (Sharpe anual): 0.226
+PBO (CSCV): 0.425  (barra < 0.5)
+Sharpe IS (70%): -0.286   Sharpe OOS (30%): 0.333
+
+--- BENCHMARK: BUY&HOLD SPY (mesmo recorte) ---
+SPY Sharpe anual: 0.932   SPY CAGR: 13.79%
+bate buy&hold? False
+diversifica (corr<0.3 & Sharpe>=0.5)? False
+robusto OOS (PBO<0.5 & SR_oos>0)? True
+
+--- GRID (todas as trials; Sharpe anual) ---
+  capm|bw36|L12g1|f0.2         SR_stress=+0.13 SR_base=+0.15 n=133
+  capm|bw24|L12g1|f0.2         SR_stress=+0.12 SR_base=+0.14 n=145
+  capm|bw36|L12g1|f0.333       SR_stress=+0.06 SR_base=+0.08 n=133
+  ff3|bw36|L12g1|f0.2          SR_stress=-0.03 SR_base=-0.01 n=133
+  capm|bw24|L12g1|f0.333       SR_stress=-0.08 SR_base=-0.06 n=145
+  ff3|bw24|L12g1|f0.2          SR_stress=-0.19 SR_base=-0.17 n=145
+  ff3|bw36|L12g1|f0.333        SR_stress=-0.20 SR_base=-0.17 n=133
+  ff3|bw24|L12g1|f0.333        SR_stress=-0.28 SR_base=-0.25 n=145
+
+==============================================================================
+VEREDITO: REPROVA
+==============================================================================

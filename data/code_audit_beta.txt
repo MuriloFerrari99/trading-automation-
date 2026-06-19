@@ -1,0 +1,199 @@
+================================================================================
+AUDITORIA ADVERSARIAL — simulation/beta_portfolio.py + data/beta_verdict.txt
+Auditor: O CODER (independente; nao escreveu o codigo). Read-only no codigo.
+Data: 2026-06-15.
+ALVO DO ATAQUE: o PASSA do componente "vol-target sozinho"
+  (Sharpe 1.19 vs buy&hold 0.97; MaxDD -13.5% vs -38.8%; Calmar 0.51 vs 0.41).
+Risco grave = FALSO POSITIVO. Metodo: reproduzi os numeros e rodei provas
+adversariais (data/_audit_beta_probe*.py) que importam as funcoes do modulo
+sem alterar o codigo-alvo.
+================================================================================
+
+VEREDITO: ***PASSA CONFIAVEL*** — a vantagem do vol-target e real e robusta.
+  Nenhum look-ahead, nenhum cherry-pick de janela, nenhum artefato de cripto/
+  ffill, custo cobrado corretamente, anualizacao correta, 100% reprodutivel.
+  Ressalvas de SEVERIDADE BAIXA (atribuicao/realismo) abaixo — nenhuma derruba
+  o PASSA. Detalhe item a item:
+
+--------------------------------------------------------------------------------
+0) REPRODUTIBILIDADE — OK (item 7 do briefing)
+--------------------------------------------------------------------------------
+`uv run python -m simulation.beta_portfolio` regenera EXATAMENTE os numeros do
+data/beta_verdict.txt commitado: vol-target Sharpe 1.19 / MaxDD -13.5% / Calmar
+0.51 / CAGR +6.9%; estrategia completa S Sharpe 0.77 / MaxDD -16.2%. Cache
+presente em data/beta_cache/ (8 tickers, ate 2026-06-15). SEM divergencia.
+
+--------------------------------------------------------------------------------
+1) LOOK-AHEAD — OK, SEM VAZAMENTO (item 1) — confianca ALTA
+--------------------------------------------------------------------------------
+Teste de truncar-painel (o pedido explicito do briefing): calculei os pesos no
+painel inteiro e num painel truncado em 2020-01-01; comparei os pesos ANTES do
+corte.
+  - VOL-TARGET-ONLY:  max|Δpeso| pre-corte = 0.000e+00  (0 celulas diferentes)
+  - ESTRATEGIA completa (com portao): max|Δpeso| = 0.000e+00
+  - BENCH A (eq-weight):              max|Δpeso| = 0.000e+00
+Repeti truncando em 2010/2016/2021 e comparando o RETORNO DIARIO LIQUIDO da
+janela comum: max|Δ| = 0.000e+00 em todos. Conclusao: nada do futuro vaza para
+os pesos/retornos do passado. O `.shift(1)` em weights_disciplined:369 e o
+desenho de run_portfolio (beta_portfolio.py:393-410, weights.loc[t] aplicado ao
+retorno de t, decidido com dado <= t-1) estao corretos.
+  Prova de shift: vol valida de SPY em 1993-03-15; 1o peso != 0 em 1993-04-02
+  (peso atrasa a vol em >= 1 barra). beta_portfolio.py:322-324, :369.
+  Mask de rebalance (beta_portfolio.py:226-234): apesar do np.roll dar wraparound
+  no 1o elemento, eles forcam iloc[0]=True; conferi 402 flags do modulo == 402
+  "1o dia util do mes" calculados a mao, 0 mismatches. Sem rebalance fantasma.
+
+--------------------------------------------------------------------------------
+2) JANELA A DEDO (2004-11-18) — LEGITIMA, NAO E CHERRY-PICK (item 2) — ALTA
+--------------------------------------------------------------------------------
+A ancoragem em 2004-11-18 (diversified_start, beta_portfolio.py:197-217) e
+correcao de survivorship/composicao DEFENSAVEL, nao cherry-pick: antes de GLD
+(2004) a cesta era ~100% acoes e o eq-weight nao era "diversificado". Ela
+PENALIZA a vantagem da estrategia, nao a infla (retira a bolha .com do book de A).
+  ATAQUE — testei outras datas de inicio. O PASSA do vol-target SOBREVIVE a
+  TODAS (vol.Sharpe >= A - 0.05 e tombo materialmente melhor):
+    inicio                 A.Sh   vol.Sh   A.DD     vol.DD   A.Cal  vol.Cal  PASSA
+    2004-11-18 (div_start) 0.97   1.19    -38.8%   -13.5%   0.41   0.51    PASSA
+    2005-01-01             0.98   1.19    -38.8%   -13.5%   0.41   0.51    PASSA
+    2006-05-01 (SLV vivo)  0.98   1.21    -38.8%   -13.5%   0.43   0.52    PASSA
+    2007-01-01             0.99   1.19    -38.8%   -13.5%   0.44   0.52    PASSA
+    2008-01-01             0.98   1.14    -38.8%   -13.5%   0.44   0.49    PASSA
+    2010-01-01             1.04   1.19    -38.8%   -13.5%   0.47   0.52    PASSA
+    2012-01-01             1.01   1.07    -38.8%   -13.5%   0.47   0.47    PASSA*
+    2015-01-01 (BTC vivo)  1.12   1.15    -38.8%   -13.5%   0.59   0.52    PASSA*
+    2018-01-01 (ETH vivo)  0.89   1.05    -38.8%   -13.5%   0.49   0.50    PASSA
+  Nota: o MaxDD de -13.5%/-38.8% e identico em TODA data de inicio porque o pior
+  tombo de cada um e um EVENTO UNICO tardio (vol-target: 2021-11-09 -> 2022-10-20;
+  A: ate 2018-12-14), presente em toda janela. Confirmado em probe2-A. Nao e bug.
+  (*) Em 2012/2015 a vantagem de tombo/Calmar do vol-target encolhe (Calmar empata
+  ou A passa o vol em Calmar isolado), mas o criterio "MaxDD <= 80% de A" ainda
+  vale com folga (-13.5% << 80% de -38.8% = -31%). Severidade: nenhuma — o PASSA
+  e estavel; so a MARGEM de Calmar varia com a janela, como esperado.
+
+--------------------------------------------------------------------------------
+3) GAP CRITICO RESOLVIDO: SENSIBILIDADE DO VOL-TARGET-SOZINHO (item 3) — ALTA
+--------------------------------------------------------------------------------
+O briefing apontou certo: a grade do modulo (_sensitivity_table:761-794) so
+varia a ESTRATEGIA COMPLETA (que FALHA). Eu rodei a grade no VOL-TARGET-SOZINHO.
+O Sharpe ~1.19 e o PASSA SOBREVIVEM a tudo:
+    variacao        CAGR    Sharpe  MaxDD    Calmar  expo   PASSA
+    PADRAO          6.9%    1.19   -13.5%   0.51    74%    PASSA
+    vol_lb=20       7.1%    1.17   -14.2%   0.50    78%    PASSA
+    vol_lb=40       6.9%    1.17   -13.3%   0.52    75%    PASSA
+    vol_lb=90       6.8%    1.17   -13.7%   0.49    73%    PASSA
+    vol_lb=120      6.7%    1.17   -14.1%   0.48    73%    PASSA
+    vol_alvo=6%     4.2%    1.18    -8.3%   0.51    46%    PASSA
+    vol_alvo=8%     5.6%    1.18   -10.9%   0.51    61%    PASSA
+    vol_alvo=12%    8.1%    1.20   -16.0%   0.51    84%    PASSA
+    vol_alvo=15%    9.1%    1.18   -19.5%   0.47    93%    PASSA
+    vol_alvo=20%    9.5%    1.15   -24.0%   0.40    98%    PASSA
+    cripto_max=0%   6.5%    1.09   -13.2%   0.49    81%    PASSA
+    cripto_max=2%   6.8%    1.17   -13.2%   0.52    76%    PASSA
+    cripto_max=10%  7.0%    1.19   -13.5%   0.52    74%    PASSA
+    cripto_max=20%  7.0%    1.19   -13.5%   0.52    74%    PASSA
+  Sharpe varia so 1.09..1.20 em TODA a grade (lookback de vol, vol-alvo, teto de
+  cripto). vol_alvo controla so a ALAVANCA de risco (CAGR/MaxDD sobem juntos, a
+  RAZAO Sharpe/Calmar fica ~constante) — assinatura de vol-targeting honesto, NAO
+  de overfit. Dia do rebalance (probe TEST3b): +0/+5/+10/+15 dias -> Sharpe
+  1.19/1.18/1.12/1.13. Robusto. NAO e fragil. Este era o risco #1 de falso
+  positivo e ele NAO se materializa.
+
+--------------------------------------------------------------------------------
+4) CRIPTO / ffill / cap / redistribuicao (item 4) — OK — confianca ALTA
+--------------------------------------------------------------------------------
+  - ffill fantasma: o ffill da cripto no calendario de acoes (load_panel:188-192,
+    limit=3) NAO cria retorno fantasma: dias de retorno ZERO em BTC = 1 de 2953
+    (0.0%), ETH = 0 de 2159. Como cripto negocia 24/7, o fechamento do dia util
+    quase sempre existe; o ffill so cobre feriados raros. Sem Sharpe inflado por
+    dias-fantasma.
+  - cap de 5%: o teto e respeitado nos pesos efetivos — BTC max = 0.0500 (no teto),
+    ETH max = 0.0356 (abaixo). Sem violacao (beta_portfolio.py:341-352).
+  - redistribuicao: o excedente cortado da cripto vai SO para nao-cripto
+    (proporcional), nunca re-infla cripto; gross final max = 1.0000 (<= 1, sem
+    alavancagem). Matematica correta.
+  - SEM cripto (dropei BTC/ETH): vol-target ainda Sharpe 1.09 vs A 0.89, MaxDD
+    -13.2% vs -25.5%, Calmar 0.49 vs 0.39 -> AINDA PASSA. O PASSA NAO depende da
+    cripto. (E o cap de 5%/nome ja torna a cripto quase irrelevante no resultado.)
+
+--------------------------------------------------------------------------------
+5) CUSTO (item 5) — APLICADO CORRETAMENTE — confianca ALTA
+--------------------------------------------------------------------------------
+  - As 3 carteiras passam pelo MESMO run_portfolio (beta_portfolio.py:383-410)
+    com o MESMO _cost_vector por classe. Custo cobrado sobre |Δpeso| diario,
+    incl. a entrada do dia 0 (prepend=zeros -> equity[0]=0.9997, entrada de 100%
+    cobrada). Igual para A, B e S.
+  - turnover do vol-target REALMENTE cobrado, mas e BAIXO: 0.96-1.01x/ano (259
+    dias de mudanca em 21.5a = 12/ano = exatamente os rebalances mensais; |Δw|
+    medio por rebalance = 0.080). Drag no CAGR = 0.04pp. E baixo porque a vol
+    rolante de 60d muda devagar e o rebalance e mensal — coerente, nao suspeito.
+  - RESSALVA (severidade BAIXA, ja documentada no codigo, :237-243): o flat-hold
+    entre rebalances ignora o drift de preco -> SUB-conta o turnover real. Mas
+    (a) penaliza os 3 contendores igualmente e (b) eu reimplementei o backtest
+    COM drift intra-mes (probe2-F): Sharpe 1.19 (flat) -> 1.21 (com drift),
+    CAGR 6.93% -> 7.00%, MaxDD -13.5% -> -13.4%. O flat-hold e, se algo, LEVEMENTE
+    CONSERVADOR. O custo subestimado NAO e a muleta do PASSA.
+  - ESTRESSE de custo 2x e 4x: vol-target Sharpe 1.18 / 1.17, ainda PASSA. Edge
+    de custo robusto (turnover baixo o protege).
+
+--------------------------------------------------------------------------------
+6) ANUALIZACAO / DECOMPOSICAO (item 6) — OK — confianca ALTA
+--------------------------------------------------------------------------------
+  - Sharpe: _annualized_sharpe (beta_portfolio.py:432-436) usa sqrt(252)*mean/std
+    com ddof=1. Recalculei a mao a partir do retorno liquido: 1.1888 == o do
+    modulo. Vol anualizada realizada do vol-target = 5.78% (alvo 10%) — coerente
+    com a aproximacao SEM correlacao declarada (beta_portfolio.py:354-361): ela
+    SUBdimensiona a alavanca (conservadora), nunca infla. Honesto.
+  - Decomposicao (tabela 2): vol-only e gate-only sao recalculados ligando/
+    desligando cada peca via use_gate/use_vol_target (beta_portfolio.py:720-733),
+    rodados na MESMA janela-cabeca. Sem vazamento entre as pecas. A soma "ambos=S"
+    bate com a linha S da tabela 1. Coerente.
+
+--------------------------------------------------------------------------------
+RESSALVA DE ATRIBUICAO (severidade BAIXA — nao derruba o PASSA, refina a CLAIM)
+--------------------------------------------------------------------------------
+Ataquei a NARRATIVA "o lever e o vol-targeting (1/vol)". Controle ingenuo
+(probe3-D): equal-weight + a MESMA escala de caixa p/ 10% de vol, SEM o tilt
+1/vol -> Sharpe 1.01, MaxDD -12.8%, CAGR 6.5%. Ou seja:
+  - buy&hold (A):                 Sharpe 0.97
+  - so DES-ARRISCAR p/ caixa (10% vol), pesos iguais: Sharpe 1.01  (+0.04)
+  - + tilt 1/vol por ativo (vol-target): Sharpe 1.19  (+0.18)
+LEITURA: ~1/5 do ganho de Sharpe vem do simples "segurar menos risco / caixa em
+bull" e ~4/5 do tilt inverso-vol que joga peso em bonds/ouro (baixa vol). AMBOS
+sao mecanismos LEGITIMOS e DECLARADOS — nao ha artefato escondido. So registro
+que a maior parte do edge e a REALOCACAO 1/vol (mais bonds), nao so o caixa; e a
+parte "caixa" sozinha tambem ja bate o buy&hold. O PASSA vs A continua REAL.
+
+--------------------------------------------------------------------------------
+NOTA SECUNDARIA (informativa): warmup de vol meia-janela
+--------------------------------------------------------------------------------
+vol usa min_periods=vol_lookback//2 (=30) (beta_portfolio.py:324). Nos primeiros
+~60 dias a exposicao bruta foi 100% (probe3-B) — a escala de vol nao reduziu cedo.
+Isso afeta so 2004 (1o ano). Como comecar em 2005/2006/2007 ainda PASSA (item 2),
+o warmup curto NAO e o driver do resultado. Severidade: nenhuma.
+
+================================================================================
+CONCLUSAO FINAL — PASSA CONFIAVEL
+================================================================================
+O PASSA do "vol-target sozinho" e GENUINO e ROBUSTO:
+  [OK] sem look-ahead (truncar-painel = 0 diff em pesos E retornos).
+  [OK] janela 2004-11-18 e correcao legitima de survivorship; PASSA sobrevive a
+       TODA data de inicio testada (2005..2018).
+  [OK] sensibilidade do PROPRIO vol-target (o gap que o briefing mandou fechar):
+       Sharpe 1.09-1.20 em toda a grade de lookback/vol-alvo/cripto/dia-rebal.
+       NAO e overfit, NAO e fragil.
+  [OK] cripto: cap e redistribuicao corretos; ffill nao gera retorno fantasma;
+       o PASSA persiste ATE SEM cripto.
+  [OK] custo cobrado igual nas 3 carteiras; turnover do vol-target cobrado de
+       verdade (so e baixo, ~1x/ano, por desenho); sobrevive a custo 2x/4x.
+  [OK] anualizacao do Sharpe correta (recalculo a mao bate); aproximacao de vol
+       e conservadora; decomposicao sem vazamento.
+UNICA ressalva (severidade BAIXA): a maior parte do edge vem do tilt 1/vol (mais
+bonds), nao so do caixa — refina a explicacao, NAO invalida o PASSA. O relatorio
+beta_verdict.txt e HONESTO: reprova a estrategia COMPLETA e credita o vol-target
+corretamente.
+
+Confianca de que NAO ha falso positivo: ALTA.
+
+ARTEFATOS desta auditoria (podem ser removidos; nao tocam o codigo-alvo):
+  data/_audit_beta_probe.py, _audit_beta_probe2.py, _audit_beta_probe3.py
+[STATUS: CONCLUIDO]

@@ -36,6 +36,13 @@ class RiskDecision:
     intent: TradeIntent | None  # possivelmente com qty ajustada
 
 
+def is_risk_increasing(intent: TradeIntent) -> bool:
+    """True se a intencao AUMENTA o risco do portfolio (compra equity; venda de put)."""
+    if isinstance(intent, OptionOrderIntent):
+        return intent.contract.option_type == OptionType.PUT and intent.side == OrderSide.SELL
+    return intent.side == OrderSide.BUY
+
+
 class RiskManager:
     def __init__(
         self,
@@ -61,11 +68,8 @@ class RiskManager:
         return self._guard.update(equity)
 
     @staticmethod
-    def is_risk_increasing(intent: TradeIntent) -> bool:
-        if isinstance(intent, OptionOrderIntent):
-            # Venda de PUT (cash-secured) abre exposicao; covered call reduz/neutro.
-            return intent.contract.option_type == OptionType.PUT and intent.side == OrderSide.SELL
-        return intent.side == OrderSide.BUY
+    def is_risk_increasing(intent: TradeIntent) -> bool:  # noqa: D102
+        return is_risk_increasing(intent)
 
     def assess(
         self,

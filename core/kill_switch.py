@@ -18,7 +18,7 @@ from pathlib import Path
 
 _TRUTHY = {"1", "true", "yes", "on", "engaged"}
 
-DEFAULT_SENTINEL = Path("KILL_SWITCH")
+DEFAULT_SENTINEL = Path(__file__).resolve().parent.parent / "KILL_SWITCH"
 
 
 class KillSwitchEngagedError(RuntimeError):

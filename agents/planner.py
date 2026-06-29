@@ -19,7 +19,7 @@ from data.signal_repo import SignalRepository
 from data.state_repo import StateRepository
 from feedback.models import MarketRegime
 from feedback.regime import classify_regime
-from risk.manager import RiskManager
+from risk.manager import RiskManager, is_risk_increasing
 from strategies.base import Strategy, StrategyContext, TradeIntent
 from strategies.signals.base import SignalService
 
@@ -139,7 +139,7 @@ class Planner:
             # Confianca (regime + sinais + ML) apenas para intents que ABREM
             # risco — saidas/protecoes passam direto e nao precisam de sizing.
             confidence = None
-            if self._enricher is not None and RiskManager.is_risk_increasing(intent):
+            if self._enricher is not None and is_risk_increasing(intent):
                 regime = self._regime_for(symbol, regime_cache)
                 confidence, ctx = self._confidence_for(
                     intent, symbol, price, account.equity, regime

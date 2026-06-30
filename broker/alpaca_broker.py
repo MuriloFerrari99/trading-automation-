@@ -39,7 +39,7 @@ def _normalize_crypto_symbol(symbol: str) -> str:
     tenham barra; qualquer outra coisa (acoes) passa intacta."""
     if "/" in symbol:
         return symbol
-    for quote in ("USDT", "USDC", "USD", "BTC", "ETH"):
+    for quote in ("USDT", "USDC", "USD"):
         if symbol.endswith(quote) and len(symbol) > len(quote):
             return f"{symbol[: -len(quote)]}/{quote}"
     return symbol

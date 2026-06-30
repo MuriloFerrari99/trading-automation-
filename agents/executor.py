@@ -273,7 +273,7 @@ class Executor:
                     side.value, symbol, attempt, self._max_retries, exc,
                 )
                 if attempt < self._max_retries:
-                    time.sleep(self._backoff * attempt)
+                    time.sleep(self._backoff * (2 ** (attempt - 1)))
         logger.error(
             "Ordem %s %s falhou apos %d tentativas: %s",
             side.value, symbol, self._max_retries, last_exc,
